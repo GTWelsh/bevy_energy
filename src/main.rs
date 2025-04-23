@@ -8,19 +8,30 @@ use bevy::{
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(
-            Startup,
-            (setup_demo_scene, setup_floor, setup_player, add_cubes),
-        )
-        .insert_resource(FloorSize(100.0))
+        .add_systems(Startup, (setup_floor, setup_player, add_cubes))
+        .add_systems(Update, (move_player, move_camera))
+        .insert_resource(FloorSize(1000.0))
+        .insert_resource(CameraView(CameraViewType::TopDown))
         .run();
+}
+
+#[derive(PartialEq, Eq)]
+enum CameraViewType {
+    TopDown,
+    ThirdPerson,
 }
 
 #[derive(Resource)]
 struct FloorSize(f32);
 
+#[derive(Resource)]
+struct CameraView(CameraViewType);
+
 #[derive(Component)]
 struct Player;
+
+#[derive(Component)]
+struct PlayerCamera;
 
 #[derive(Component)]
 struct Cube;
@@ -45,6 +56,69 @@ fn setup_floor(
     ));
 }
 
+fn move_player(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut player: Single<&mut Transform, With<Player>>,
+    time: Res<Time>,
+) {
+    let speed = 5.0 * time.delta_secs();
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        player.translation.z -= speed;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        player.translation.x -= speed;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        player.translation.x += speed;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        player.translation.z += speed;
+    }
+}
+
+fn move_camera(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut camera: Single<&mut Transform, With<PlayerCamera>>,
+    mut camera_view: ResMut<CameraView>,
+    time: Res<Time>,
+) {
+    let speed = 50.0 * time.delta_secs();
+    if keyboard_input.pressed(KeyCode::KeyE) {
+        camera.translation.y -= speed;
+        camera.look_at(Vec3::NEG_Z, Vec3::Y);
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyQ) {
+        camera.translation.y += speed;
+        camera.look_at(Vec3::NEG_Z, Vec3::Y);
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyV) {
+        if camera_view.0 == CameraViewType::ThirdPerson {
+            camera_view.0 = CameraViewType::TopDown;
+        } else if camera_view.0 == CameraViewType::TopDown {
+            camera_view.0 = CameraViewType::ThirdPerson;
+        }
+
+        if camera_view.0 == CameraViewType::TopDown {
+            camera.translation.x = 0.0;
+            camera.translation.y = 30.0;
+            camera.translation.z = 0.0;
+        }
+
+        if camera_view.0 == CameraViewType::ThirdPerson {
+            camera.translation.x = 0.0;
+            camera.translation.y = 1.0;
+            camera.translation.z = 6.0;
+        }
+
+        camera.look_at(Vec3::NEG_Z, Vec3::Y);
+    }
+}
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -53,12 +127,34 @@ fn setup_player(
     let height = 2.0;
     let radius = 0.5;
 
-    commands.spawn((
-        Mesh3d(meshes.add(Capsule3d::new(radius, height - radius * 2.0))),
-        MeshMaterial3d(materials.add(Color::WHITE)),
-        Transform::from_xyz(-1.5, height / 2.0, -1.0),
-        Player,
-    ));
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Capsule3d::new(radius, height - radius * 2.0))),
+            MeshMaterial3d(materials.add(Color::WHITE)),
+            Transform::from_xyz(-1.5, height / 2.0, -1.0),
+            Player,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Camera3d::default(),
+                Camera {
+                    hdr: true, // 1. HDR is required for bloom
+                    ..default()
+                },
+                Tonemapping::TonyMcMapface, // 2. Using a tonemapper that desaturates to white is recommended
+                Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
+                Bloom::NATURAL,
+                PlayerCamera,
+            ));
+
+            parent.spawn((
+                PointLight {
+                    shadows_enabled: true,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.9, 0.0),
+            ));
+        });
 }
 
 fn add_cubes(
@@ -67,13 +163,16 @@ fn add_cubes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let max_number_of_cubes = (floor_size.0.floor() * 500.0) as i32;
+    let size_mutli = 15.0;
+    let density = 500.0 / size_mutli;
+    let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
     let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
     let cube_type_range = 0..5;
     let mut cube_meshes: Vec<(f32, Handle<Mesh>)> = Vec::with_capacity(5);
+    let upper_size = 0.35 * size_mutli;
 
     for _i in cube_type_range {
-        let cube_size = rand::random_range(0.05..0.35);
+        let cube_size = rand::random_range(0.05..upper_size);
         cube_meshes.push((
             cube_size,
             meshes.add(Cuboid::new(cube_size, cube_size, cube_size)),
@@ -101,27 +200,4 @@ fn add_cubes(
             Cube,
         ));
     }
-}
-
-/// set up a simple 3D scene
-fn setup_demo_scene(mut commands: Commands) {
-    // light
-    commands.spawn((
-        PointLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(4.0, 8.0, 4.0),
-    ));
-    // camera
-    commands.spawn((
-        Camera3d::default(),
-        Camera {
-            hdr: true, // 1. HDR is required for bloom
-            ..default()
-        },
-        Tonemapping::TonyMcMapface, // 2. Using a tonemapper that desaturates to white is recommended
-        Transform::from_xyz(-2.5, 2.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Bloom::NATURAL,
-    ));
 }
