@@ -1,15 +1,14 @@
 use std::f32::consts::TAU;
 
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    prelude::*,
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, prelude::*
 };
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_floor, setup_player, add_cubes))
-        .add_systems(Update, (move_player, move_camera))
+        .add_systems(Update, ((rotate_player, move_player).chain(), move_camera))
         .insert_resource(FloorSize(1000.0))
         .insert_resource(CameraView(CameraViewType::TopDown))
         .run();
@@ -56,27 +55,44 @@ fn setup_floor(
     ));
 }
 
+fn rotate_player(
+    mouse_motion: Res<AccumulatedMouseMotion>,
+    time: Res<Time>,
+    mut transform: Single<&mut Transform, With<Player>>,
+) {
+    let rotation_speed: f32 = 0.5;
+    let rotation_amount = -mouse_motion.delta.x * rotation_speed;
+
+    transform.rotate_y(rotation_amount * time.delta_secs());
+}
+
 fn move_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player: Single<&mut Transform, With<Player>>,
     time: Res<Time>,
 ) {
     let speed = 5.0 * time.delta_secs();
+    let mut movement = Vec3::ZERO;
+
     if keyboard_input.pressed(KeyCode::KeyW) {
-        player.translation.z -= speed;
+        movement.z -= speed;
     }
 
     if keyboard_input.pressed(KeyCode::KeyA) {
-        player.translation.x -= speed;
+        movement.x -= speed;
     }
 
     if keyboard_input.pressed(KeyCode::KeyD) {
-        player.translation.x += speed;
+        movement.x += speed;
     }
 
     if keyboard_input.pressed(KeyCode::KeyS) {
-        player.translation.z += speed;
+        movement.z += speed;
     }
+
+    let new_movement = player.rotation.mul_vec3(movement); 
+
+    player.translation += new_movement;
 }
 
 fn move_camera(
