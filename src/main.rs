@@ -1,13 +1,13 @@
 use std::f32::consts::TAU;
 
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, prelude::*
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, pbr::{CascadeShadowConfigBuilder, NotShadowCaster}, prelude::*
 };
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup_floor, setup_player, add_cubes))
+        .add_systems(Startup, (setup_sky, setup_floor, setup_player, add_cubes))
         .add_systems(Update, ((rotate_player, move_player).chain(), move_camera))
         .insert_resource(FloorSize(1000.0))
         .insert_resource(CameraView(CameraViewType::TopDown))
@@ -34,6 +34,46 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct Cube;
+
+fn setup_sky(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    floor_size: Res<FloorSize>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+
+    // this is the shadow quality config!
+    let cascade_shadow_config = CascadeShadowConfigBuilder {
+        first_cascade_far_bound: 100.0,
+        maximum_distance: 1000.0,
+        ..default()
+    }
+    .build();
+
+    // Sun
+    commands.spawn((
+        DirectionalLight {
+            color: Color::srgb(0.98, 0.95, 0.82),
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(-220.0, 200.0, -220.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
+        cascade_shadow_config,
+    ));
+
+    // Sky
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(2.0, 1.0, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Srgba::hex("888888").unwrap().into(),
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_scale(Vec3::splat(floor_size.0)),
+        NotShadowCaster,
+    ));
+}
 
 fn setup_floor(
     mut commands: Commands,
@@ -183,15 +223,16 @@ fn add_cubes(
     let density = 500.0 / size_mutli;
     let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
     let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
-    let cube_type_range = 0..5;
+    let cube_type_range = 0..10;
     let mut cube_meshes: Vec<(f32, Handle<Mesh>)> = Vec::with_capacity(5);
     let upper_size = 0.35 * size_mutli;
 
     for _i in cube_type_range {
-        let cube_size = rand::random_range(0.05..upper_size);
+        let cube_size_x = rand::random_range(0.05..upper_size);
+        let cube_size_y = rand::random_range(0.05..upper_size);
         cube_meshes.push((
-            cube_size,
-            meshes.add(Cuboid::new(cube_size, cube_size, cube_size)),
+            cube_size_y,
+            meshes.add(Cuboid::new(cube_size_x, cube_size_y, cube_size_x)),
         ));
     }
 
@@ -200,7 +241,7 @@ fn add_cubes(
     let range_of_all_cubes = 1..actual_number_of_cubes;
 
     for _i in range_of_all_cubes {
-        let (cube_size, cube_mesh) = &cube_meshes[rand::random_range(0..5)];
+        let (cube_size, cube_mesh) = &cube_meshes[rand::random_range(0..10)];
 
         let half_floor_size = floor_size.0 / 2.0;
 
