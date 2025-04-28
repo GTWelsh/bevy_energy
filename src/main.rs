@@ -1,8 +1,9 @@
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, prelude::*
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, prelude::*,
 };
+use bevy::pbr::NotShadowCaster;
 
 fn main() {
     App::new()
@@ -34,7 +35,13 @@ struct Player;
 struct PlayerCamera;
 
 #[derive(Component)]
+struct PlayerWeapon;
+
+#[derive(Component)]
 struct Cube;
+
+#[derive(Component)]
+struct AimPoint(Vec3);
 
 fn setup_floor(
     mut commands: Commands,
@@ -99,6 +106,7 @@ fn move_player(
 fn change_camera(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera: Single<&mut Transform, With<PlayerCamera>>,
+    aimpoint: Single<&AimPoint, With<Player>>,
     mut camera_view: ResMut<CameraView>,
 ){
     if !keyboard_input.just_pressed(KeyCode::KeyV) {
@@ -138,9 +146,8 @@ fn change_camera(
         camera.translation.x = 0.0;
         camera.translation.y = 0.85;
         camera.translation.z = -0.2;
-        camera.look_at(Vec3::new(0.0, 0.85, -1.0), Vec3::Y);
+        camera.look_at(aimpoint.0, Vec3::Y);
     }
-
 }
 
 fn move_camera(
@@ -167,6 +174,7 @@ fn setup_player(
 ) {
     let height = 2.0;
     let radius = 0.5;
+    let aimpoint = Vec3::new(0.0, 0.85, -1.0);
 
     commands
         .spawn((
@@ -174,6 +182,7 @@ fn setup_player(
             MeshMaterial3d(materials.add(Color::WHITE)),
             Transform::from_xyz(-1.5, height / 2.0, -1.0),
             Player,
+            AimPoint(aimpoint),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -194,6 +203,19 @@ fn setup_player(
                     ..default()
                 },
                 Transform::from_xyz(0.0, 0.9, 0.0),
+            ));
+
+            let weapon_length = 1.0;
+            let weapon_radius = 0.05;
+            let actual_weapon_length = weapon_length - weapon_radius * 2.0;
+            let rot = Quat::from_rotation_x(PI / 2.0);
+
+            parent.spawn((
+                Mesh3d(meshes.add(Capsule3d::new(weapon_radius, actual_weapon_length))),
+                MeshMaterial3d(materials.add(Color::WHITE)),
+                Transform::from_xyz(0.2, 0.7, -0.5).with_rotation(rot),
+                NotShadowCaster,
+                PlayerWeapon,
             ));
         });
 }
