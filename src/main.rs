@@ -1,15 +1,25 @@
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::TAU;
 
-use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, input::mouse::AccumulatedMouseMotion, prelude::*,
-};
 use bevy::pbr::NotShadowCaster;
+use bevy::{
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
+    input::mouse::AccumulatedMouseMotion,
+    prelude::*,
+};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_floor, setup_player, add_cubes))
-        .add_systems(Update, ((rotate_player, move_player).chain(), move_camera, change_camera))
+        .add_systems(
+            Update,
+            (
+                (rotate_player, move_player).chain(),
+                move_camera,
+                change_camera,
+                player_shoot,
+            ),
+        )
         .insert_resource(FloorSize(1000.0))
         .insert_resource(CameraView(CameraViewType::TopDown))
         .run();
@@ -63,6 +73,24 @@ fn setup_floor(
     ));
 }
 
+fn player_shoot(
+    mut commands: Commands,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    spawn_transform: Single<&GlobalTransform, With<PlayerWeapon>>,
+) {
+    if !mouse_input.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Vec3 { x, y, z } = spawn_transform.translation();
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(0.05))),
+        MeshMaterial3d(materials.add(Color::WHITE)),
+        Transform::from_xyz(x, y, z),
+    ));
+}
+
 fn rotate_player(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
@@ -98,7 +126,7 @@ fn move_player(
         movement.z += speed;
     }
 
-    let new_movement = player.rotation.mul_vec3(movement); 
+    let new_movement = player.rotation.mul_vec3(movement);
 
     player.translation += new_movement;
 }
@@ -108,19 +136,19 @@ fn change_camera(
     mut camera: Single<&mut Transform, With<PlayerCamera>>,
     aimpoint: Single<&AimPoint, With<Player>>,
     mut camera_view: ResMut<CameraView>,
-){
+) {
     if !keyboard_input.just_pressed(KeyCode::KeyV) {
         return;
     }
 
-    let view_modes = [CameraViewType::TopDown, CameraViewType::ThirdPerson, CameraViewType::FirstPerson];
+    let view_modes = [
+        CameraViewType::TopDown,
+        CameraViewType::ThirdPerson,
+        CameraViewType::FirstPerson,
+    ];
     let view_index = view_modes.iter().position(|v| *v == camera_view.0);
 
-    let mut next_view_index = if let Some(i) = view_index {
-        i + 1
-    } else {
-        0
-    };
+    let mut next_view_index = if let Some(i) = view_index { i + 1 } else { 0 };
 
     if next_view_index >= view_modes.len() {
         next_view_index = 0;
@@ -174,7 +202,7 @@ fn setup_player(
 ) {
     let height = 2.0;
     let radius = 0.5;
-    let aimpoint = Vec3::new(0.0, 0.85, -1.0);
+    let aimpoint = Vec3::new(0.0, 0.85, -10.0);
 
     commands
         .spawn((
@@ -202,18 +230,21 @@ fn setup_player(
                     shadows_enabled: true,
                     ..default()
                 },
-                Transform::from_xyz(0.0, 0.9, 0.0),
+                Transform::from_xyz(0.0, 0.5, 0.0),
             ));
 
             let weapon_length = 1.0;
             let weapon_radius = 0.05;
             let actual_weapon_length = weapon_length - weapon_radius * 2.0;
-            let rot = Quat::from_rotation_x(PI / 2.0);
 
             parent.spawn((
-                Mesh3d(meshes.add(Capsule3d::new(weapon_radius, actual_weapon_length))),
+                Mesh3d(meshes.add(Cuboid::new(
+                    weapon_radius,
+                    weapon_radius,
+                    actual_weapon_length,
+                ))),
                 MeshMaterial3d(materials.add(Color::WHITE)),
-                Transform::from_xyz(0.2, 0.7, -0.5).with_rotation(rot),
+                Transform::from_xyz(0.2, 0.7, -0.5).looking_at(aimpoint, Vec3::Y),
                 NotShadowCaster,
                 PlayerWeapon,
             ));
