@@ -42,6 +42,9 @@ struct CameraView(CameraViewType);
 struct Player;
 
 #[derive(Component)]
+struct Velocity(Vec3);
+
+#[derive(Component)]
 struct PlayerCamera;
 
 #[derive(Component)]
@@ -104,29 +107,48 @@ fn rotate_player(
 
 fn move_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut player: Single<&mut Transform, With<Player>>,
+    mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
     time: Res<Time>,
 ) {
-    let speed = 5.0 * time.delta_secs();
-    let mut movement = Vec3::ZERO;
+    let (mut player, mut velocity) = player_query.single_mut();
+    let vel = &mut velocity.0;
+    let acceleration = time.delta_secs();
+    let drag = -acceleration;
+    let max_speed = 0.1;
 
-    if keyboard_input.pressed(KeyCode::KeyW) {
-        movement.z -= speed;
-    }
 
-    if keyboard_input.pressed(KeyCode::KeyA) {
-        movement.x -= speed;
-    }
+    // drag not working...
 
-    if keyboard_input.pressed(KeyCode::KeyD) {
-        movement.x += speed;
-    }
+    vel.z -= if keyboard_input.pressed(KeyCode::KeyW) {
+        acceleration
+    } else {
+        drag
+    };
 
-    if keyboard_input.pressed(KeyCode::KeyS) {
-        movement.z += speed;
-    }
+    vel.x -= if keyboard_input.pressed(KeyCode::KeyA) {
+        acceleration
+    } else {
+        drag
+    };
 
-    let new_movement = player.rotation.mul_vec3(movement);
+    vel.x += if keyboard_input.pressed(KeyCode::KeyD) {
+        acceleration
+    } else {
+        drag
+    };
+
+    vel.z += if keyboard_input.pressed(KeyCode::KeyS) {
+        acceleration
+    } else {
+        drag
+    };
+
+    let clamped_vel = vel.clamp_length_max(max_speed);
+    vel.x = clamped_vel.x;
+    vel.y = clamped_vel.y;
+    vel.z = clamped_vel.z;
+
+    let new_movement = player.rotation.mul_vec3(*vel);
 
     player.translation += new_movement;
 }
@@ -183,7 +205,7 @@ fn move_camera(
     mut camera: Single<&mut Transform, With<PlayerCamera>>,
     time: Res<Time>,
 ) {
-    let speed = 5.0 * time.delta_secs();
+    let speed = 55.0 * time.delta_secs();
     if keyboard_input.pressed(KeyCode::KeyE) {
         camera.translation.y -= speed;
         camera.look_at(Vec3::NEG_Z, Vec3::Y);
@@ -210,6 +232,7 @@ fn setup_player(
             MeshMaterial3d(materials.add(Color::WHITE)),
             Transform::from_xyz(-1.5, height / 2.0, -1.0),
             Player,
+            Velocity(Vec3::ZERO),
             AimPoint(aimpoint),
         ))
         .with_children(|parent| {
