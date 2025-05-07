@@ -113,44 +113,53 @@ fn move_player(
     let (mut player, mut velocity) = player_query.single_mut();
     let vel = &mut velocity.0;
     let acceleration = time.delta_secs();
-    let drag = -acceleration;
-    let max_speed = 0.1;
+    let curr_speed = vel.length();
 
+    if vel.x.abs() < acceleration {
+        vel.x = 0.0;
+    }
 
-    // drag not working...
+    if vel.z.abs() < acceleration {
+        vel.z = 0.0;
+    }
 
-    vel.z -= if keyboard_input.pressed(KeyCode::KeyW) {
-        acceleration
-    } else {
-        drag
-    };
+    // using drag instead of a max_speed is sick
+    vel.x += add_drag(vel.x, vel.x.abs() / 15.0);
+    vel.z += add_drag(vel.z, vel.z.abs() / 15.0);
 
-    vel.x -= if keyboard_input.pressed(KeyCode::KeyA) {
-        acceleration
-    } else {
-        drag
-    };
+    // diag is faster
+    // use blank vec3 here instead, use 1 insteead of acceleration
+    // then normalise
+    // then multiply by acceleration
 
-    vel.x += if keyboard_input.pressed(KeyCode::KeyD) {
-        acceleration
-    } else {
-        drag
-    };
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        vel.z -= acceleration;
+    }
 
-    vel.z += if keyboard_input.pressed(KeyCode::KeyS) {
-        acceleration
-    } else {
-        drag
-    };
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        vel.x -= acceleration;
+    }
 
-    let clamped_vel = vel.clamp_length_max(max_speed);
-    vel.x = clamped_vel.x;
-    vel.y = clamped_vel.y;
-    vel.z = clamped_vel.z;
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        vel.x += acceleration;
+    }
+
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        vel.z += acceleration;
+    }
 
     let new_movement = player.rotation.mul_vec3(*vel);
 
     player.translation += new_movement;
+}
+
+fn add_drag(vel: f32, drag: f32) -> f32 {
+    match vel.partial_cmp(&0.0) {
+        Some(std::cmp::Ordering::Greater) => -drag,
+        Some(std::cmp::Ordering::Less) => drag,
+        Some(std::cmp::Ordering::Equal) => 0.0,
+        None => 0.0,
+    }
 }
 
 fn change_camera(
