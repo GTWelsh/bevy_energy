@@ -86,7 +86,9 @@ fn player_shoot(
     if !mouse_input.just_pressed(MouseButton::Left) {
         return;
     }
+
     let Vec3 { x, y, z } = spawn_transform.translation();
+
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(0.05))),
         MeshMaterial3d(materials.add(Color::WHITE)),
@@ -100,17 +102,18 @@ fn rotate_player(
     mut transform: Single<&mut Transform, With<Player>>,
 ) {
     let rotation_speed: f32 = 0.5;
-    let rotation_amount = -mouse_motion.delta.x * rotation_speed;
+    let rotation_amount_y = -mouse_motion.delta.x * rotation_speed;
+    let rotation_amount_x = -mouse_motion.delta.y * rotation_speed;
 
-    transform.rotate_y(rotation_amount * time.delta_secs());
+    transform.rotate_y(rotation_amount_y * time.delta_secs());
+    transform.rotate_local_x(rotation_amount_x * time.delta_secs());
 }
 
-fn move_player(
-    mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
-) {
+fn move_player(mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>) {
     let (mut player, velocity) = player_query.single_mut();
-    let new_movement = player.rotation.mul_vec3(velocity.0);
-    player.translation += new_movement;
+
+    let Vec3 { x, y, z } = player.rotation.mul_vec3(velocity.0);
+    player.translation += Vec3::new(x, 0.0, z);
 }
 
 fn calc_new_velocity(
@@ -133,17 +136,17 @@ fn calc_new_velocity(
     let drag_x = add_drag(vel.x, speed_x / DRAG_COF_INV);
     let drag_z = add_drag(vel.z, speed_z / DRAG_COF_INV);
 
-    if speed_x < drag_x {
-        vel.x = 0.0;
+    vel.x = if speed_x < drag_x {
+        0.0
     } else {
-        vel.x += drag_x;
-    }
+        vel.x + drag_x
+    };
 
-    if speed_z < drag_z {
-        vel.z = 0.0;
+    vel.z = if speed_z < drag_z {
+        0.0
     } else {
-        vel.z += drag_z;
-    }
+        vel.z + drag_z
+    };
 
     let mut new_vel = Vec3::ZERO;
     if keyboard_input.pressed(KeyCode::KeyW) {
@@ -245,6 +248,9 @@ fn move_camera(
     }
 }
 
+//TODO: Player capsule cannot look up and down. The camera does (relative so easy) and the weapon
+//attaches to the camera
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -266,6 +272,10 @@ fn setup_player(
         .with_children(|parent| {
             parent.spawn((
                 Camera3d::default(),
+                PerspectiveProjection {
+                    fov: 90.0_f32.to_radians(),
+                    ..default()
+                },
                 Camera {
                     hdr: true, // 1. HDR is required for bloom
                     ..default()
