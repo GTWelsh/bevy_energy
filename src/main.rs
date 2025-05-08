@@ -14,7 +14,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                (rotate_player, move_player).chain(),
+                (rotate_player, calc_new_velocity, move_player).chain(),
                 move_camera,
                 change_camera,
                 player_shoot,
@@ -106,51 +106,70 @@ fn rotate_player(
 }
 
 fn move_player(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
+) {
+    let (mut player, velocity) = player_query.single_mut();
+    let new_movement = player.rotation.mul_vec3(velocity.0);
+    player.translation += new_movement;
+}
+
+fn calc_new_velocity(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut player_velocity_query: Query<&mut Velocity, With<Player>>,
     time: Res<Time>,
 ) {
-    let (mut player, mut velocity) = player_query.single_mut();
+    // configurables
+
+    // how much force the object uses to move
+    const ACCELERATION: f32 = 1.0;
+
+    // inverse drag - higher = less drag
+    const DRAG_COF_INV: f32 = 5.0;
+
+    let mut velocity = player_velocity_query.single_mut();
     let vel = &mut velocity.0;
-    let acceleration = time.delta_secs();
-    let curr_speed = vel.length();
+    let delta = time.delta_secs();
+    let (speed_x, speed_z) = (vel.x.abs(), vel.z.abs());
+    let drag_x = add_drag(vel.x, speed_x / DRAG_COF_INV);
+    let drag_z = add_drag(vel.z, speed_z / DRAG_COF_INV);
 
-    if vel.x.abs() < acceleration {
+    if speed_x < drag_x {
         vel.x = 0.0;
+    } else {
+        vel.x += drag_x;
     }
 
-    if vel.z.abs() < acceleration {
+    if speed_z < drag_z {
         vel.z = 0.0;
+    } else {
+        vel.z += drag_z;
     }
 
-    // using drag instead of a max_speed is sick
-    vel.x += add_drag(vel.x, vel.x.abs() / 15.0);
-    vel.z += add_drag(vel.z, vel.z.abs() / 15.0);
-
-    // diag is faster
-    // use blank vec3 here instead, use 1 insteead of acceleration
-    // then normalise
-    // then multiply by acceleration
-
+    let mut new_vel = Vec3::ZERO;
     if keyboard_input.pressed(KeyCode::KeyW) {
-        vel.z -= acceleration;
+        new_vel.z = -1f32;
     }
 
     if keyboard_input.pressed(KeyCode::KeyA) {
-        vel.x -= acceleration;
+        new_vel.x = -1f32;
     }
 
     if keyboard_input.pressed(KeyCode::KeyD) {
-        vel.x += acceleration;
+        new_vel.x = 1f32;
     }
 
     if keyboard_input.pressed(KeyCode::KeyS) {
-        vel.z += acceleration;
+        new_vel.z = 1f32;
     }
 
-    let new_movement = player.rotation.mul_vec3(*vel);
+    if new_vel == Vec3::ZERO {
+        return;
+    }
 
-    player.translation += new_movement;
+    let norm = new_vel.normalize();
+
+    vel.x += norm.x * ACCELERATION * delta;
+    vel.z += norm.z * ACCELERATION * delta;
 }
 
 fn add_drag(vel: f32, drag: f32) -> f32 {
