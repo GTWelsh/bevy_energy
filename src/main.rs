@@ -14,14 +14,15 @@ fn main() {
         .add_systems(
             Update,
             (
-                (rotate_player, calc_new_velocity, move_player).chain(),
+                ((rotate_player, rotate_camera), calc_new_velocity, move_player).chain(),
                 move_camera,
-                change_camera,
+                change_camera_keybind,
                 player_shoot,
             ),
         )
+        .add_observer(set_camera)
         .insert_resource(FloorSize(1000.0))
-        .insert_resource(CameraView(CameraViewType::TopDown))
+        .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
 
@@ -31,6 +32,9 @@ enum CameraViewType {
     ThirdPerson,
     FirstPerson,
 }
+
+#[derive(Event)]
+struct SetCameraView(CameraViewType);
 
 #[derive(Resource)]
 struct FloorSize(f32);
@@ -96,6 +100,17 @@ fn player_shoot(
     ));
 }
 
+fn rotate_camera(
+    mouse_motion: Res<AccumulatedMouseMotion>,
+    time: Res<Time>,
+    mut transform: Single<&mut Transform, With<PlayerCamera>>,
+) {
+    let rotation_speed: f32 = 0.5;
+    let rotation_amount_x = -mouse_motion.delta.y * rotation_speed;
+
+    transform.rotate_local_x(rotation_amount_x * time.delta_secs());
+}
+
 fn rotate_player(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
@@ -103,10 +118,8 @@ fn rotate_player(
 ) {
     let rotation_speed: f32 = 0.5;
     let rotation_amount_y = -mouse_motion.delta.x * rotation_speed;
-    let rotation_amount_x = -mouse_motion.delta.y * rotation_speed;
 
     transform.rotate_y(rotation_amount_y * time.delta_secs());
-    transform.rotate_local_x(rotation_amount_x * time.delta_secs());
 }
 
 fn move_player(mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>) {
@@ -184,10 +197,9 @@ fn add_drag(vel: f32, drag: f32) -> f32 {
     }
 }
 
-fn change_camera(
+fn change_camera_keybind(
+    mut commands: Commands,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut camera: Single<&mut Transform, With<PlayerCamera>>,
-    aimpoint: Single<&AimPoint, With<Player>>,
     mut camera_view: ResMut<CameraView>,
 ) {
     if !keyboard_input.just_pressed(KeyCode::KeyV) {
@@ -209,21 +221,31 @@ fn change_camera(
 
     camera_view.0 = view_modes[next_view_index];
 
-    if camera_view.0 == CameraViewType::TopDown {
+    commands.trigger(SetCameraView(camera_view.0));
+}
+
+fn set_camera(
+    trigger: Trigger<SetCameraView>,
+    mut camera: Single<&mut Transform, With<PlayerCamera>>,
+    aimpoint: Single<&AimPoint, With<Player>>,
+) {
+    let view = trigger.event().0;
+
+    if view == CameraViewType::TopDown {
         camera.translation.x = 0.0;
         camera.translation.y = 30.0;
         camera.translation.z = 0.0;
         camera.look_at(Vec3::NEG_Z, Vec3::Y);
     }
 
-    if camera_view.0 == CameraViewType::ThirdPerson {
+    if view == CameraViewType::ThirdPerson {
         camera.translation.x = 0.0;
         camera.translation.y = 1.0;
         camera.translation.z = 6.0;
         camera.look_at(Vec3::NEG_Z, Vec3::Y);
     }
 
-    if camera_view.0 == CameraViewType::FirstPerson {
+    if view == CameraViewType::FirstPerson {
         camera.translation.x = 0.0;
         camera.translation.y = 0.85;
         camera.translation.z = -0.2;
@@ -248,9 +270,6 @@ fn move_camera(
     }
 }
 
-//TODO: Player capsule cannot look up and down. The camera does (relative so easy) and the weapon
-//attaches to the camera
-
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -270,21 +289,39 @@ fn setup_player(
             AimPoint(aimpoint),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Camera3d::default(),
-                PerspectiveProjection {
-                    fov: 90.0_f32.to_radians(),
-                    ..default()
-                },
-                Camera {
-                    hdr: true, // 1. HDR is required for bloom
-                    ..default()
-                },
-                Tonemapping::TonyMcMapface, // 2. Using a tonemapper that desaturates to white is recommended
-                Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
-                Bloom::NATURAL,
-                PlayerCamera,
-            ));
+            parent
+                .spawn((
+                    Camera3d::default(),
+                    PerspectiveProjection {
+                        fov: 90.0_f32.to_radians(),
+                        ..default()
+                    },
+                    Camera {
+                        hdr: true, // 1. HDR is required for bloom
+                        ..default()
+                    },
+                    Tonemapping::TonyMcMapface, // 2. Using a tonemapper that desaturates to white is recommended
+                    Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
+                    Bloom::NATURAL,
+                    PlayerCamera,
+                ))
+                .with_children(|parent_camera| {
+                    let weapon_length = 1.0;
+                    let weapon_radius = 0.05;
+                    let actual_weapon_length = weapon_length - weapon_radius * 2.0;
+
+                    parent_camera.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(
+                            weapon_radius,
+                            weapon_radius,
+                            actual_weapon_length,
+                        ))),
+                        MeshMaterial3d(materials.add(Color::WHITE)),
+                        Transform::from_xyz(0.05, -0.1, 0.0).looking_at(aimpoint, Vec3::Y),
+                        NotShadowCaster,
+                        PlayerWeapon,
+                    ));
+                });
 
             parent.spawn((
                 PointLight {
@@ -293,23 +330,9 @@ fn setup_player(
                 },
                 Transform::from_xyz(0.0, 0.5, 0.0),
             ));
-
-            let weapon_length = 1.0;
-            let weapon_radius = 0.05;
-            let actual_weapon_length = weapon_length - weapon_radius * 2.0;
-
-            parent.spawn((
-                Mesh3d(meshes.add(Cuboid::new(
-                    weapon_radius,
-                    weapon_radius,
-                    actual_weapon_length,
-                ))),
-                MeshMaterial3d(materials.add(Color::WHITE)),
-                Transform::from_xyz(0.2, 0.7, -0.5).looking_at(aimpoint, Vec3::Y),
-                NotShadowCaster,
-                PlayerWeapon,
-            ));
         });
+
+    commands.trigger(SetCameraView(CameraViewType::FirstPerson));
 }
 
 fn add_cubes(
