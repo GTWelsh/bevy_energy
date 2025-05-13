@@ -14,8 +14,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                ((rotate_player, rotate_camera), calc_new_velocity, move_player).chain(),
-                move_camera,
+                ((lean_camera, rotate_player, rotate_camera), calc_new_velocity, move_player).chain(),
                 change_camera_keybind,
                 player_shoot,
             ),
@@ -98,6 +97,32 @@ fn player_shoot(
         MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_xyz(x, y, z),
     ));
+}
+
+
+fn lean_camera(
+    time: Res<Time>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut transform: Single<&mut Transform, With<PlayerCamera>>,
+) {
+    let mut rotate_by = 0f32;
+    let rotation_speed = 200.0 * time.delta_secs();
+
+    if keyboard_input.pressed(KeyCode::KeyQ) {
+        rotate_by = rotation_speed.to_radians();
+    } else if keyboard_input.pressed(KeyCode::KeyE) {
+        rotate_by = -rotation_speed.to_radians();
+    } else if transform.rotation.z.abs() < 5f32.to_radians() {
+        transform.rotation.z = 0.0;
+    } else if transform.rotation.z > 0f32 {
+        rotate_by = -rotation_speed.to_radians();
+    } else if transform.rotation.z < 0f32 {
+        rotate_by = rotation_speed.to_radians();
+    }
+
+    if rotate_by != 0f32 {
+        transform.rotate_local_z(rotate_by);
+    }
 }
 
 fn rotate_camera(
@@ -253,22 +278,22 @@ fn set_camera(
     }
 }
 
-fn move_camera(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut camera: Single<&mut Transform, With<PlayerCamera>>,
-    time: Res<Time>,
-) {
-    let speed = 55.0 * time.delta_secs();
-    if keyboard_input.pressed(KeyCode::KeyE) {
-        camera.translation.y -= speed;
-        camera.look_at(Vec3::NEG_Z, Vec3::Y);
-    }
-
-    if keyboard_input.pressed(KeyCode::KeyQ) {
-        camera.translation.y += speed;
-        camera.look_at(Vec3::NEG_Z, Vec3::Y);
-    }
-}
+// fn move_camera(
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+//     mut camera: Single<&mut Transform, With<PlayerCamera>>,
+//     time: Res<Time>,
+// ) {
+//     let speed = 55.0 * time.delta_secs();
+//     if keyboard_input.pressed(KeyCode::KeyE) {
+//         camera.translation.y -= speed;
+//         camera.look_at(Vec3::NEG_Z, Vec3::Y);
+//     }
+//
+//     if keyboard_input.pressed(KeyCode::KeyQ) {
+//         camera.translation.y += speed;
+//         camera.look_at(Vec3::NEG_Z, Vec3::Y);
+//     }
+// }
 
 fn setup_player(
     mut commands: Commands,
