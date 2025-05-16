@@ -105,25 +105,60 @@ fn lean_camera(
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
     let mut rotate_by = 0f32;
+    let axis = Vec3::NEG_Z; //transform.local_z().as_vec3().normalize();
     let rotation_speed = 200.0 * time.delta_secs();
+    let rotation_point = Vec3::new(transform.translation.x, transform.translation.y - 1f32, transform.translation.z);
+    let zero_rot = Quat::from_axis_angle(axis, 0f32.to_radians());
+    let limit_rot = Quat::from_axis_angle(axis, 45f32.to_radians());
+    let limit_rot_neg = Quat::from_axis_angle(axis, -45f32.to_radians());
+    let curr_angle = transform.rotation.to_axis_angle().1;
+    let positive_angle = curr_angle > 0f32;
+    let at_limits = if curr_angle == 0f32 { false } else if positive_angle { transform.rotation.angle_between(limit_rot) < 0f32.to_radians() } else { transform.rotation.angle_between(limit_rot_neg).abs() > 45f32.to_radians() };
 
-    let abs_z_rot = transform.rotation.z.abs();
-
-    if keyboard_input.pressed(KeyCode::KeyQ) {
-        rotate_by = rotation_speed.to_radians();
-    } else if keyboard_input.pressed(KeyCode::KeyE) {
-        rotate_by = -rotation_speed.to_radians();
-    } else if abs_z_rot < 5f32.to_radians() {
-        transform.rotation.z = 0.0;
-    } else if transform.rotation.z > 0f32 {
-        rotate_by = -rotation_speed.to_radians();
-    } else if transform.rotation.z < 0f32 {
-        rotate_by = rotation_speed.to_radians();
+    if keyboard_input.just_pressed(KeyCode::KeyI) {
+        info!("{:?}", zero_rot);
+        info!("{:?}", limit_rot);
+        info!("{:?}", limit_rot_neg);
+        info!("{:?}", curr_angle);
+        info!("{:?}", curr_angle.to_degrees());
+        info!("{:?}", at_limits);
+        //TODO: angle_between goes from 0 to 180 here, not negative or anything
+        info!("{:?}", transform.rotation.angle_between(limit_rot).to_degrees());
+        info!("{:?}", transform.rotation.angle_between(limit_rot_neg).to_degrees());
     }
 
-    if rotate_by != 0f32 {
-        transform.rotate_local_z(rotate_by);
+    if !at_limits {
+        let pressed_q = keyboard_input.pressed(KeyCode::KeyQ);
+        let pressed_e = keyboard_input.pressed(KeyCode::KeyE);
+        if  pressed_q {
+            rotate_by = rotation_speed;
+        } else if pressed_e {
+            rotate_by = -rotation_speed;
+        } else {
+            rotate_by = if positive_angle { rotation_speed } else { -rotation_speed };
+        }
     }
+
+    let rotation = Quat::from_axis_angle(axis, rotate_by.to_radians());
+    transform.rotate_around(rotation_point, rotation);
+
+    // let abs_z_rot = transform.rotation.z.abs();
+    //
+    // if keyboard_input.pressed(KeyCode::KeyQ) {
+    //     rotate_by = rotation_speed.to_radians();
+    // } else if keyboard_input.pressed(KeyCode::KeyE) {
+    //     rotate_by = -rotation_speed.to_radians();
+    // } else if abs_z_rot < 5f32.to_radians() {
+    //     transform.rotation.z = 0.0;
+    // } else if transform.rotation.z > 0f32 {
+    //     rotate_by = -rotation_speed.to_radians();
+    // } else if transform.rotation.z < 0f32 {
+    //     rotate_by = rotation_speed.to_radians();
+    // }
+    //
+    // if rotate_by != 0f32 {
+    //     transform.rotate_local_z(rotate_by);
+    // }
 
 
 }
