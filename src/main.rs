@@ -104,43 +104,21 @@ fn lean_camera(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
-    let mut rotate_by = 0f32;
-    let axis = Vec3::NEG_Z; //transform.local_z().as_vec3().normalize();
-    let rotation_speed = 200.0 * time.delta_secs();
+    const ROTATION_STEP: f32 = 100_f32;
     let rotation_point = Vec3::new(transform.translation.x, transform.translation.y - 1f32, transform.translation.z);
-    let zero_rot = Quat::from_axis_angle(axis, 0f32.to_radians());
-    let limit_rot = Quat::from_axis_angle(axis, 45f32.to_radians());
-    let limit_rot_neg = Quat::from_axis_angle(axis, -45f32.to_radians());
-    let curr_angle = transform.rotation.to_axis_angle().1;
-    let positive_angle = curr_angle > 0f32;
-    let at_limits = if curr_angle == 0f32 { false } else if positive_angle { transform.rotation.angle_between(limit_rot) < 0f32.to_radians() } else { transform.rotation.angle_between(limit_rot_neg).abs() > 45f32.to_radians() };
+    let mut rotate_by = 0_f32;
 
-    if keyboard_input.just_pressed(KeyCode::KeyI) {
-        info!("{:?}", zero_rot);
-        info!("{:?}", limit_rot);
-        info!("{:?}", limit_rot_neg);
-        info!("{:?}", curr_angle);
-        info!("{:?}", curr_angle.to_degrees());
-        info!("{:?}", at_limits);
-        //TODO: angle_between goes from 0 to 180 here, not negative or anything
-        info!("{:?}", transform.rotation.angle_between(limit_rot).to_degrees());
-        info!("{:?}", transform.rotation.angle_between(limit_rot_neg).to_degrees());
+    if keyboard_input.pressed(KeyCode::KeyQ) {
+        rotate_by = -ROTATION_STEP;
+    } else if keyboard_input.pressed(KeyCode::KeyE) {
+        rotate_by = ROTATION_STEP;
     }
 
-    if !at_limits {
-        let pressed_q = keyboard_input.pressed(KeyCode::KeyQ);
-        let pressed_e = keyboard_input.pressed(KeyCode::KeyE);
-        if  pressed_q {
-            rotate_by = rotation_speed;
-        } else if pressed_e {
-            rotate_by = -rotation_speed;
-        } else {
-            rotate_by = if positive_angle { rotation_speed } else { -rotation_speed };
-        }
-    }
-
-    let rotation = Quat::from_axis_angle(axis, rotate_by.to_radians());
+    let rotate_by_rad = rotate_by.to_radians();
+    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotate_by_rad * time.delta_secs());
     transform.rotate_around(rotation_point, rotation);
+
+    info!("{:?}", transform.rotation.to_euler(EulerRot::XYZ));
 
     // let abs_z_rot = transform.rotation.z.abs();
     //
@@ -171,7 +149,7 @@ fn rotate_camera(
     let rotation_speed: f32 = 0.5;
     let rotation_amount_x = -mouse_motion.delta.y * rotation_speed;
 
-    transform.rotate_local_x(rotation_amount_x * time.delta_secs());
+    transform.rotate_x(rotation_amount_x * time.delta_secs());
 }
 
 fn rotate_player(
@@ -188,7 +166,7 @@ fn rotate_player(
 fn move_player(mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>) {
     let (mut player, velocity) = player_query.single_mut();
 
-    let Vec3 { x, y, z } = player.rotation.mul_vec3(velocity.0);
+    let Vec3 { x, y: _, z } = player.rotation.mul_vec3(velocity.0);
     player.translation += Vec3::new(x, 0.0, z);
 }
 
