@@ -64,6 +64,9 @@ struct Cube;
 #[derive(Component)]
 struct AimPoint(Vec3);
 
+#[derive(Component)]
+struct Lean(f32);
+
 fn setup_floor(
     mut commands: Commands,
     floor_size: Res<FloorSize>,
@@ -108,47 +111,62 @@ fn lean_camera(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
+    mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
 ) {
-    const ROTATION_STEP: f32 = 100_f32;
     let rotation_point = Vec3::new(
         transform.translation.x,
         transform.translation.y - 1f32,
         transform.translation.z,
     );
-    let mut rotate_by = 0_f32;
     let max_lean = 45_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
-    let is_leaning = curr_angle != 0_f32;
-    let leaning_right = curr_angle < 0.0;
-    let leaning_left = curr_angle > 0.0;
-    let right_limit = leaning_right && curr_angle <= -max_lean;
-    let left_limit = leaning_left && curr_angle >= max_lean;
+    let is_leaning = player_lean.0 != 0_f32;
+    let leaning_right = player_lean.0 > 0_f32;
+    let leaning_left = player_lean.0 < 0_f32;
     let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
     let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
     let trying_to_lean = trying_to_lean_left || trying_to_lean_right;
+    let player_lean_speed = 0.01_f32;
 
-    if trying_to_lean { // lean
-        if !left_limit && trying_to_lean_left {
-            rotate_by = -ROTATION_STEP;
-        } else if !right_limit && trying_to_lean_right {
-            rotate_by = ROTATION_STEP;
+    if trying_to_lean {
+        // lean
+        if trying_to_lean_left {
+            // rotate_by = -ROTATION_STEP;
+            player_lean.0 -= player_lean_speed;
+        } else if trying_to_lean_right {
+            // rotate_by = ROTATION_STEP;
+            player_lean.0 += player_lean_speed;
         }
-    } else if is_leaning { // auto return to center
+    } else if is_leaning {
+        // auto return to center
         if leaning_right {
-            rotate_by = -ROTATION_STEP;
+            // rotate_by = -ROTATION_STEP;
+            player_lean.0 -= player_lean_speed;
         } else if leaning_left {
-            rotate_by = ROTATION_STEP;
+            // rotate_by = ROTATION_STEP;
+            player_lean.0 += player_lean_speed;
         }
     }
 
-    let mut rotation_step = rotate_by.to_radians() * time.delta_secs();
+    player_lean.0 = player_lean.0.clamp(-1_f32, 1_f32);
 
-    // reset to center when close to center
-    if !trying_to_lean && rotation_step.abs() > curr_angle.to_radians().abs() {
-        rotation_step = curr_angle.to_radians();
+    if player_lean.0.abs() < player_lean_speed && !trying_to_lean {
+        player_lean.0 = 0_f32;
     }
 
-    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotation_step);
+    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::ElasticInOut);
+
+    let alpha = if leaning_left || trying_to_lean_left { -player_lean.0 } else { player_lean.0 };
+
+    let mut curved_lean = translation_curve.sample(alpha).unwrap();
+
+    if leaning_right {
+        curved_lean = -curved_lean;
+    }
+
+    let rotation_step = curr_angle - curved_lean;
+
+    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotation_step * time.delta_secs());
     transform.rotate_around(rotation_point, rotation);
 }
 
@@ -339,6 +357,7 @@ fn setup_player(
             Player,
             Velocity(Vec3::ZERO),
             AimPoint(aimpoint),
+            Lean(0_f32),
         ))
         .with_children(|parent| {
             parent
