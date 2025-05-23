@@ -14,7 +14,12 @@ fn main() {
         .add_systems(
             Update,
             (
-                ((lean_camera, rotate_player, rotate_camera), calc_new_velocity, move_player).chain(),
+                (
+                    (lean_camera, rotate_player, rotate_camera),
+                    calc_new_velocity,
+                    move_player,
+                )
+                    .chain(),
                 change_camera_keybind,
                 player_shoot,
             ),
@@ -105,40 +110,46 @@ fn lean_camera(
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
     const ROTATION_STEP: f32 = 100_f32;
-    let rotation_point = Vec3::new(transform.translation.x, transform.translation.y - 1f32, transform.translation.z);
+    let rotation_point = Vec3::new(
+        transform.translation.x,
+        transform.translation.y - 1f32,
+        transform.translation.z,
+    );
     let mut rotate_by = 0_f32;
+    let max_lean = 45_f32;
+    let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
+    let is_leaning = curr_angle != 0_f32;
+    let leaning_right = curr_angle < 0.0;
+    let leaning_left = curr_angle > 0.0;
+    let right_limit = leaning_right && curr_angle <= -max_lean;
+    let left_limit = leaning_left && curr_angle >= max_lean;
+    let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
+    let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
+    let trying_to_lean = trying_to_lean_left || trying_to_lean_right;
 
-    if keyboard_input.pressed(KeyCode::KeyQ) {
-        rotate_by = -ROTATION_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyE) {
-        rotate_by = ROTATION_STEP;
+    if trying_to_lean { // lean
+        if !left_limit && trying_to_lean_left {
+            rotate_by = -ROTATION_STEP;
+        } else if !right_limit && trying_to_lean_right {
+            rotate_by = ROTATION_STEP;
+        }
+    } else if is_leaning { // auto return to center
+        if leaning_right {
+            rotate_by = -ROTATION_STEP;
+        } else if leaning_left {
+            rotate_by = ROTATION_STEP;
+        }
     }
 
-    let rotate_by_rad = rotate_by.to_radians();
-    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotate_by_rad * time.delta_secs());
+    let mut rotation_step = rotate_by.to_radians() * time.delta_secs();
+
+    // reset to center when close to center
+    if !trying_to_lean && rotation_step.abs() > curr_angle.to_radians().abs() {
+        rotation_step = curr_angle.to_radians();
+    }
+
+    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotation_step);
     transform.rotate_around(rotation_point, rotation);
-
-    info!("{:?}", transform.rotation.to_euler(EulerRot::XYZ));
-
-    // let abs_z_rot = transform.rotation.z.abs();
-    //
-    // if keyboard_input.pressed(KeyCode::KeyQ) {
-    //     rotate_by = rotation_speed.to_radians();
-    // } else if keyboard_input.pressed(KeyCode::KeyE) {
-    //     rotate_by = -rotation_speed.to_radians();
-    // } else if abs_z_rot < 5f32.to_radians() {
-    //     transform.rotation.z = 0.0;
-    // } else if transform.rotation.z > 0f32 {
-    //     rotate_by = -rotation_speed.to_radians();
-    // } else if transform.rotation.z < 0f32 {
-    //     rotate_by = rotation_speed.to_radians();
-    // }
-    //
-    // if rotate_by != 0f32 {
-    //     transform.rotate_local_z(rotate_by);
-    // }
-
-
 }
 
 fn rotate_camera(
