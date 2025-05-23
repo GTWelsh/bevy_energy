@@ -118,7 +118,7 @@ fn lean_camera(
         transform.translation.y - 1f32,
         transform.translation.z,
     );
-    let max_lean = 45_f32;
+    let max_lean = 30_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
     let is_leaning = player_lean.0 != 0_f32;
     let leaning_right = player_lean.0 > 0_f32;
@@ -126,24 +126,22 @@ fn lean_camera(
     let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
     let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
     let trying_to_lean = trying_to_lean_left || trying_to_lean_right;
-    let player_lean_speed = 0.01_f32;
+    let player_lean_speed = 0.045_f32;
+    let will_lean_left = trying_to_lean_left && !leaning_right;
+    let will_lean_right = trying_to_lean_right && !leaning_left;
+    let will_lean = will_lean_left || will_lean_right;
+    let will_recenter = !will_lean && is_leaning;
 
-    if trying_to_lean {
-        // lean
-        if trying_to_lean_left {
-            // rotate_by = -ROTATION_STEP;
-            player_lean.0 -= player_lean_speed;
-        } else if trying_to_lean_right {
-            // rotate_by = ROTATION_STEP;
-            player_lean.0 += player_lean_speed;
-        }
+    // lean
+    if will_lean_left {
+        player_lean.0 -= player_lean_speed;
+    } else if will_lean_right {
+        player_lean.0 += player_lean_speed;
     } else if is_leaning {
         // auto return to center
         if leaning_right {
-            // rotate_by = -ROTATION_STEP;
             player_lean.0 -= player_lean_speed;
         } else if leaning_left {
-            // rotate_by = ROTATION_STEP;
             player_lean.0 += player_lean_speed;
         }
     }
@@ -154,11 +152,23 @@ fn lean_camera(
         player_lean.0 = 0_f32;
     }
 
-    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::ElasticInOut);
+    // let easing = if will_lean {
+    //     EaseFunction::CubicInOut
+    // } else if will_recenter {
+    //     EaseFunction::CubicInOut
+    // } else {
+    //     EaseFunction::ExponentialInOut
+    // };
 
-    let alpha = if leaning_left || trying_to_lean_left { -player_lean.0 } else { player_lean.0 };
+    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::CubicInOut);
 
-    let mut curved_lean = translation_curve.sample(alpha).unwrap();
+    let alpha = if leaning_left || will_lean_left {
+        -player_lean.0
+    } else {
+        player_lean.0
+    };
+
+    let mut curved_lean = translation_curve.sample(alpha).unwrap_or(0_f32);
 
     if leaning_right {
         curved_lean = -curved_lean;
@@ -166,7 +176,11 @@ fn lean_camera(
 
     let rotation_step = curr_angle - curved_lean;
 
-    let rotation = Quat::from_axis_angle(-transform.local_z().normalize(), rotation_step * time.delta_secs());
+    let rotation = Quat::from_axis_angle(
+        -transform.local_z().normalize(),
+        rotation_step * time.delta_secs(),
+    );
+
     transform.rotate_around(rotation_point, rotation);
 }
 
