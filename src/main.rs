@@ -107,49 +107,53 @@ fn player_shoot(
     ));
 }
 
+//TODO: Y axis mouse look limits - perfect down and up cause weirdness with lean recentering
 fn lean_camera(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
+    player_transform: Single<&GlobalTransform, (With<Player>, Without<PlayerCamera>)>,
     mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
 ) {
-    let rotation_point = Vec3::new(
-        transform.translation.x,
-        transform.translation.y - 1f32,
-        transform.translation.z,
-    );
+    let player_position = player_transform.translation();
+    let rotation_point = Vec3::new(0_f32, 0_f32, transform.translation.z);
     let max_lean = 30_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
-    let is_leaning = player_lean.0 != 0_f32;
     let leaning_right = player_lean.0 > 0_f32;
     let leaning_left = player_lean.0 < 0_f32;
     let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
     let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
     let trying_to_lean = trying_to_lean_left || trying_to_lean_right;
-    let player_lean_speed = 0.045_f32;
+    let player_lean_speed = 4_f32 * time.delta_secs();
     let will_lean_left = trying_to_lean_left && !leaning_right;
     let will_lean_right = trying_to_lean_right && !leaning_left;
     let will_lean = will_lean_left || will_lean_right;
-    let will_recenter = !will_lean && is_leaning;
+    // let will_recenter = !will_lean && is_leaning;
+
+    let mut working_lean = player_lean.0;
 
     // lean
     if will_lean_left {
-        player_lean.0 -= player_lean_speed;
+        working_lean -= player_lean_speed;
     } else if will_lean_right {
-        player_lean.0 += player_lean_speed;
-    } else if is_leaning {
+        working_lean += player_lean_speed;
+    } else {
         // auto return to center
         if leaning_right {
-            player_lean.0 -= player_lean_speed;
+            working_lean -= player_lean_speed;
         } else if leaning_left {
-            player_lean.0 += player_lean_speed;
+            working_lean += player_lean_speed;
         }
     }
 
-    player_lean.0 = player_lean.0.clamp(-1_f32, 1_f32);
+    working_lean = working_lean.clamp(-1_f32, 1_f32);
 
-    if player_lean.0.abs() < player_lean_speed && !trying_to_lean {
-        player_lean.0 = 0_f32;
+    if working_lean.abs() < player_lean_speed && !trying_to_lean {
+        working_lean = 0_f32;
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyI) {
+        info!("{:?}", working_lean);
     }
 
     // let easing = if will_lean {
@@ -160,12 +164,13 @@ fn lean_camera(
     //     EaseFunction::ExponentialInOut
     // };
 
-    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::CubicInOut);
+    // let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::CubicInOut);
+    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::SineOut);
 
     let alpha = if leaning_left || will_lean_left {
-        -player_lean.0
+        -working_lean
     } else {
-        player_lean.0
+        working_lean
     };
 
     let mut curved_lean = translation_curve.sample(alpha).unwrap_or(0_f32);
@@ -174,14 +179,13 @@ fn lean_camera(
         curved_lean = -curved_lean;
     }
 
-    let rotation_step = curr_angle - curved_lean;
+    let rotation_step = (curr_angle - curved_lean).to_radians();
 
-    let rotation = Quat::from_axis_angle(
-        -transform.local_z().normalize(),
-        rotation_step * time.delta_secs(),
-    );
+    let rotation = Quat::from_axis_angle(Vec3::NEG_Z, rotation_step);
 
     transform.rotate_around(rotation_point, rotation);
+
+    player_lean.0 = working_lean;
 }
 
 fn rotate_camera(
@@ -189,10 +193,10 @@ fn rotate_camera(
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
-    let rotation_speed: f32 = 0.5;
-    let rotation_amount_x = -mouse_motion.delta.y * rotation_speed;
+    let rotation_speed: f32 = 10_f32;
+    let rotation_amount_x = (-mouse_motion.delta.y * rotation_speed) * time.delta_secs();
 
-    transform.rotate_x(rotation_amount_x * time.delta_secs());
+    transform.rotate_x(rotation_amount_x.to_radians());
 }
 
 fn rotate_player(
@@ -332,7 +336,7 @@ fn set_camera(
     if view == CameraViewType::FirstPerson {
         camera.translation.x = 0.0;
         camera.translation.y = 0.85;
-        camera.translation.z = -0.2;
+        camera.translation.z = -0.51;
         camera.look_at(aimpoint.0, Vec3::Y);
     }
 }
