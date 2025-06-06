@@ -1,6 +1,7 @@
 use std::f32::consts::TAU;
 
 use bevy::pbr::NotShadowCaster;
+use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     input::mouse::AccumulatedMouseMotion,
@@ -14,6 +15,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                hide_cursor,
                 (
                     (lean_camera, rotate_player, rotate_camera),
                     calc_new_velocity,
@@ -67,6 +69,28 @@ struct AimPoint(Vec3);
 #[derive(Component)]
 struct Lean(f32);
 
+fn hide_cursor(
+    mut q_windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut lock_cursor: Local<bool>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    let mut window = q_windows.single_mut();
+
+    if *lock_cursor {
+        window.cursor_options.grab_mode = CursorGrabMode::Confined;
+        window.cursor_options.visible = false;
+    } else {
+        window.cursor_options.grab_mode = CursorGrabMode::None;
+        window.cursor_options.visible = true;
+    }
+
+
+    if keyboard_input.just_pressed(KeyCode::F1) {
+        *lock_cursor = !*lock_cursor;
+    }
+
+}
+
 fn setup_floor(
     mut commands: Commands,
     floor_size: Res<FloorSize>,
@@ -112,10 +136,8 @@ fn lean_camera(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
-    player_transform: Single<&GlobalTransform, (With<Player>, Without<PlayerCamera>)>,
     mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
 ) {
-    let player_position = player_transform.translation();
     let rotation_point = Vec3::new(0_f32, 0_f32, transform.translation.z);
     let max_lean = 30_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
@@ -123,12 +145,10 @@ fn lean_camera(
     let leaning_left = player_lean.0 < 0_f32;
     let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
     let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
-    let trying_to_lean = trying_to_lean_left || trying_to_lean_right;
     let player_lean_speed = 4_f32 * time.delta_secs();
     let will_lean_left = trying_to_lean_left && !leaning_right;
     let will_lean_right = trying_to_lean_right && !leaning_left;
     let will_lean = will_lean_left || will_lean_right;
-    // let will_recenter = !will_lean && is_leaning;
 
     let mut working_lean = player_lean.0;
 
@@ -148,24 +168,13 @@ fn lean_camera(
 
     working_lean = working_lean.clamp(-1_f32, 1_f32);
 
-    if working_lean.abs() < player_lean_speed && !trying_to_lean {
-        working_lean = 0_f32;
-    }
+    let easing = if will_lean {
+        EaseFunction::SineOut
+    } else {
+        EaseFunction::SineIn
+    };
 
-    if keyboard_input.just_pressed(KeyCode::KeyI) {
-        info!("{:?}", working_lean);
-    }
-
-    // let easing = if will_lean {
-    //     EaseFunction::CubicInOut
-    // } else if will_recenter {
-    //     EaseFunction::CubicInOut
-    // } else {
-    //     EaseFunction::ExponentialInOut
-    // };
-
-    // let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::CubicInOut);
-    let translation_curve = EasingCurve::new(0_f32, max_lean, EaseFunction::SineOut);
+    let translation_curve = EasingCurve::new(0_f32, max_lean, easing);
 
     let alpha = if leaning_left || will_lean_left {
         -working_lean
@@ -193,8 +202,20 @@ fn rotate_camera(
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
+    const LIMIT: f32 = 35_f32;
+    const ZERO: f32 = 0_f32;
+
     let rotation_speed: f32 = 10_f32;
     let rotation_amount_x = (-mouse_motion.delta.y * rotation_speed) * time.delta_secs();
+    let positive_rot = rotation_amount_x > ZERO;
+    let negative_rot = rotation_amount_x < ZERO;
+    let current_rot = transform.rotation.to_euler(EulerRot::XYZ).0.to_degrees();
+    let high = current_rot > LIMIT && positive_rot;
+    let low = current_rot < -LIMIT && negative_rot;
+
+    if high || low {
+        return;
+    }
 
     transform.rotate_x(rotation_amount_x.to_radians());
 }
@@ -340,23 +361,6 @@ fn set_camera(
         camera.look_at(aimpoint.0, Vec3::Y);
     }
 }
-
-// fn move_camera(
-//     keyboard_input: Res<ButtonInput<KeyCode>>,
-//     mut camera: Single<&mut Transform, With<PlayerCamera>>,
-//     time: Res<Time>,
-// ) {
-//     let speed = 55.0 * time.delta_secs();
-//     if keyboard_input.pressed(KeyCode::KeyE) {
-//         camera.translation.y -= speed;
-//         camera.look_at(Vec3::NEG_Z, Vec3::Y);
-//     }
-//
-//     if keyboard_input.pressed(KeyCode::KeyQ) {
-//         camera.translation.y += speed;
-//         camera.look_at(Vec3::NEG_Z, Vec3::Y);
-//     }
-// }
 
 fn setup_player(
     mut commands: Commands,
