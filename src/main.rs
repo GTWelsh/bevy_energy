@@ -1,5 +1,6 @@
 use std::f32::consts::TAU;
 
+use bevy::math::bounding::{Aabb3d, BoundingVolume, IntersectsVolume};
 use bevy::pbr::NotShadowCaster;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
@@ -12,13 +13,14 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_floor, setup_player, add_cubes))
+        .add_systems(FixedUpdate, collision_detection)
         .add_systems(
             Update,
             (
                 hide_cursor,
                 (
                     (lean_camera, rotate_player, rotate_camera),
-                    calc_new_velocity,
+                    (calc_new_velocity, update_aabb).chain(),
                     move_player,
                 )
                     .chain(),
@@ -27,7 +29,7 @@ fn main() {
             ),
         )
         .add_observer(set_camera)
-        .insert_resource(FloorSize(1000.0))
+        .insert_resource(FloorSize(20.0))
         .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
@@ -69,6 +71,29 @@ struct AimPoint(Vec3);
 #[derive(Component)]
 struct Lean(f32);
 
+fn update_aabb(mut items: Query<(&mut Collider, &Transform)>) {
+    for (mut collider, transform) in items.iter_mut() {
+        let half_size = collider.0.half_size();
+        collider.0 = Aabb3d::new(transform.translation, half_size);
+    }
+}
+
+fn collision_detection(mut q_colliders: Query<(Entity, &Collider)>) {
+    let mut iter = q_colliders.iter_combinations_mut();
+
+    while let Some([(e1, Collider(c1)), (e2, Collider(c2))]) = iter.fetch_next() {
+        if e1 == e2 {
+            continue;
+        }
+
+        let contact = c1.intersects(c2);
+
+        if contact {
+            info!("{} contacting {}", e1, e2);
+        }
+    }
+}
+
 fn hide_cursor(
     mut q_windows: Query<&mut Window, With<PrimaryWindow>>,
     mut lock_cursor: Local<bool>,
@@ -84,11 +109,9 @@ fn hide_cursor(
         window.cursor_options.visible = true;
     }
 
-
     if keyboard_input.just_pressed(KeyCode::F1) {
         *lock_cursor = !*lock_cursor;
     }
-
 }
 
 fn setup_floor(
@@ -131,7 +154,6 @@ fn player_shoot(
     ));
 }
 
-//TODO: Y axis mouse look limits - perfect down and up cause weirdness with lean recentering
 fn lean_camera(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -362,12 +384,16 @@ fn set_camera(
     }
 }
 
+#[derive(Component)]
+struct Collider(Aabb3d);
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let height = 2.0;
+    let half_height = height / 2_f32;
     let radius = 0.5;
     let aimpoint = Vec3::new(0.0, 0.85, -10.0);
 
@@ -375,11 +401,15 @@ fn setup_player(
         .spawn((
             Mesh3d(meshes.add(Capsule3d::new(radius, height - radius * 2.0))),
             MeshMaterial3d(materials.add(Color::WHITE)),
-            Transform::from_xyz(-1.5, height / 2.0, -1.0),
+            Transform::from_xyz(-1.5, half_height, -1.0),
             Player,
             Velocity(Vec3::ZERO),
             AimPoint(aimpoint),
             Lean(0_f32),
+            Collider(Aabb3d::new(
+                Vec3::new(-1.5, half_height, -1.0),
+                Vec3::new(radius, half_height, radius),
+            )),
         ))
         .with_children(|parent| {
             parent
@@ -435,20 +465,18 @@ fn add_cubes(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let size_mutli = 15.0;
-    let density = 500.0 / size_mutli;
+    let density = 5.0 / size_mutli;
     let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
     let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
     let cube_type_range = 0..10;
-    let mut cube_meshes: Vec<(f32, Handle<Mesh>)> = Vec::with_capacity(5);
+    let mut cube_meshes: Vec<((f32, f32, f32), Handle<Mesh>)> = Vec::with_capacity(5);
     let upper_size = 0.35 * size_mutli;
 
     for _i in cube_type_range {
         let cube_size_x = rand::random_range(0.05..upper_size);
         let cube_size_y = rand::random_range(0.05..upper_size);
-        cube_meshes.push((
-            cube_size_y,
-            meshes.add(Cuboid::new(cube_size_x, cube_size_y, cube_size_x)),
-        ));
+        let mesh = Cuboid::new(cube_size_x, cube_size_y, cube_size_x);
+        cube_meshes.push(((cube_size_x, cube_size_y, cube_size_x), meshes.add(mesh)));
     }
 
     let cube_mat = materials.add(Color::srgb_u8(124, 144, 255));
@@ -461,7 +489,7 @@ fn add_cubes(
         let half_floor_size = floor_size.0 / 2.0;
 
         let x: f32 = rand::random_range(0.0..floor_size.0) - half_floor_size;
-        let y: f32 = cube_size / 2.0;
+        let y: f32 = cube_size.1 / 2.0;
         let z: f32 = rand::random_range(0.0..floor_size.0) - half_floor_size;
 
         commands.spawn((
@@ -470,6 +498,14 @@ fn add_cubes(
             Transform::from_xyz(x, y, z)
                 .with_rotation(Quat::from_rotation_y(rand::random_range(0.0..TAU))),
             Cube,
+            Collider(Aabb3d::new(
+                Vec3::new(x, y, z),
+                Vec3::new(
+                    cube_size.0 / 2_f32,
+                    cube_size.1 / 2_f32,
+                    cube_size.2 / 2_f32,
+                ),
+            )),
         ));
     }
 }
