@@ -74,15 +74,13 @@ struct AimPoint(Vec3);
 #[derive(Component)]
 struct Lean(f32);
 
-fn update_aabb(mut items: Query<(&mut Collider, &Transform, Option<&Player>)>) {
-    for (mut collider, transform, maybe_player) in items.iter_mut() {
-        let scale = if let Some(_player) = maybe_player {
-            Vec3::new(0.5, 2., 0.5)
-        } else {
-            transform.scale
-        };
+fn update_aabb(mut gizmos: Gizmos, mut items: Query<(&mut Collider, &Transform)>) {
+    for (mut collider, transform) in items.iter_mut() {
+        collider.0 =
+            Aabb3d::new(transform.translation, transform.scale / 2.).rotated_by(transform.rotation);
 
-        collider.0 = Aabb3d::new(transform.translation, scale / 2.);
+        gizmos.cuboid(transform, RED);
+        gizmos.cuboid(Transform::IDENTITY, RED);
     }
 }
 
@@ -401,14 +399,14 @@ fn setup_player(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let height = 2.0;
-    let half_height = height / 2.;
+    let half_height = height / 2_f32;
     let radius = 0.5;
     let aimpoint = Vec3::new(0.0, 0.85, -10.0);
-    let transform = Transform::from_translation(Vec3::new(radius, height / 2. + radius, radius));
+    let transform = Transform::from_xyz(-1.5, half_height, -1.0);
 
     commands
         .spawn((
-            Mesh3d(meshes.add(Capsule3d::new(radius, height))),
+            Mesh3d(meshes.add(Capsule3d::new(radius, height - radius * 2.0))),
             MeshMaterial3d(materials.add(Color::WHITE)),
             Player,
             transform,
@@ -417,7 +415,7 @@ fn setup_player(
             Lean(0_f32),
             Collider(Aabb3d::new(
                 transform.translation,
-                Vec3::new(radius, half_height + radius * 2., radius),
+                Vec3::new(radius, half_height, radius),
             )),
         ))
         .with_children(|parent| {
@@ -516,7 +514,10 @@ fn add_cubes(
             MeshMaterial3d(cube_mat.clone()),
             transform,
             Cube,
-            Collider(Aabb3d::new(transform.translation, transform.scale / 2.)),
+            Collider(
+                Aabb3d::new(transform.translation, transform.scale / 2.)
+                    .rotated_by(transform.rotation),
+            ),
         ));
     }
 }
