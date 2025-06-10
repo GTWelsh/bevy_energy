@@ -1,6 +1,9 @@
 use std::f32::consts::TAU;
 
+use bevy::color::palettes::css::RED;
+use bevy::gizmos;
 use bevy::math::bounding::{Aabb3d, BoundingVolume, IntersectsVolume};
+use bevy::math::Vec3A;
 use bevy::pbr::NotShadowCaster;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
@@ -71,10 +74,10 @@ struct AimPoint(Vec3);
 #[derive(Component)]
 struct Lean(f32);
 
-fn update_aabb(mut items: Query<(&mut Collider, &Transform)>) {
+fn update_aabb(mut gizmos: Gizmos, mut items: Query<(&mut Collider, &Transform)>) {
     for (mut collider, transform) in items.iter_mut() {
-        let half_size = collider.0.half_size();
-        collider.0 = Aabb3d::new(transform.translation, half_size);
+        collider.0 = Aabb3d::new(transform.translation, transform.scale / 2.).rotated_by(transform.rotation);
+        gizmos.rect(transform.to_isometry(), transform.scale.truncate(), RED);
     }
 }
 
@@ -464,19 +467,16 @@ fn add_cubes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let size_mutli = 15.0;
+    let size_mutli = 10.0;
     let density = 5.0 / size_mutli;
     let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
     let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
     let cube_type_range = 0..10;
-    let mut cube_meshes: Vec<((f32, f32, f32), Handle<Mesh>)> = Vec::with_capacity(5);
-    let upper_size = 0.35 * size_mutli;
+    let mut cube_meshes: Vec<Handle<Mesh>> = Vec::with_capacity(5);
 
     for _i in cube_type_range {
-        let cube_size_x = rand::random_range(0.05..upper_size);
-        let cube_size_y = rand::random_range(0.05..upper_size);
-        let mesh = Cuboid::new(cube_size_x, cube_size_y, cube_size_x);
-        cube_meshes.push(((cube_size_x, cube_size_y, cube_size_x), meshes.add(mesh)));
+        let mesh = Cuboid::new(1., 1., 1.);
+        cube_meshes.push(meshes.add(mesh));
     }
 
     let cube_mat = materials.add(Color::srgb_u8(124, 144, 255));
@@ -484,28 +484,34 @@ fn add_cubes(
     let range_of_all_cubes = 1..actual_number_of_cubes;
 
     for _i in range_of_all_cubes {
-        let (cube_size, cube_mesh) = &cube_meshes[rand::random_range(0..10)];
+        let cube_mesh = &cube_meshes[rand::random_range(0..10)];
 
         let half_floor_size = floor_size.0 / 2.0;
 
-        let x: f32 = rand::random_range(0.0..floor_size.0) - half_floor_size;
-        let y: f32 = cube_size.1 / 2.0;
-        let z: f32 = rand::random_range(0.0..floor_size.0) - half_floor_size;
+        let height = rand::random_range(1. .. 5.);
+
+        let x: f32 = (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
+        let y: f32 = height / 2.;
+        let z: f32 = (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
+
+        let transform = Transform::from_xyz(x, y, z)
+            // .with_rotation(
+            //     Quat::from_rotation_y(rand::random_range(0.0..TAU)))
+            .with_scale(Vec3::new(
+                rand::random_range(1. .. 5.),
+                height,
+                rand::random_range(1. .. 5.),
+            ));
 
         commands.spawn((
             Mesh3d(cube_mesh.clone()),
             MeshMaterial3d(cube_mat.clone()),
-            Transform::from_xyz(x, y, z)
-                .with_rotation(Quat::from_rotation_y(rand::random_range(0.0..TAU))),
+            transform,
             Cube,
             Collider(Aabb3d::new(
-                Vec3::new(x, y, z),
-                Vec3::new(
-                    cube_size.0 / 2_f32,
-                    cube_size.1 / 2_f32,
-                    cube_size.2 / 2_f32,
-                ),
-            )),
+                transform.translation,
+                transform.scale / 2.,
+            ).rotated_by(transform.rotation)),
         ));
     }
 }
