@@ -1,9 +1,4 @@
-use std::f32::consts::TAU;
-
-use bevy::color::palettes::css::RED;
-use bevy::gizmos;
-use bevy::math::Vec3A;
-use bevy::math::bounding::{Aabb3d, BoundingVolume, IntersectsVolume};
+use bevy::math::bounding::{Aabb3d, IntersectsVolume};
 use bevy::pbr::NotShadowCaster;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
@@ -107,7 +102,7 @@ fn hide_cursor(
     mut lock_cursor: Local<bool>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    let mut window = q_windows.single_mut();
+    let mut window = q_windows.single_mut().unwrap();
 
     if *lock_cursor {
         window.cursor_options.grab_mode = CursorGrabMode::Confined;
@@ -262,7 +257,7 @@ fn rotate_player(
 }
 
 fn move_player(mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>) {
-    let (mut player, velocity) = player_query.single_mut();
+    let (mut player, velocity) = player_query.single_mut().unwrap();
 
     let Vec3 { x, y: _, z } = player.rotation.mul_vec3(velocity.0);
     player.translation += Vec3::new(x, 0.0, z);
@@ -281,7 +276,7 @@ fn calc_new_velocity(
     // inverse drag - higher = less drag
     const DRAG_COF_INV: f32 = 5.0;
 
-    let mut velocity = player_velocity_query.single_mut();
+    let mut velocity = player_velocity_query.single_mut().unwrap();
     let vel = &mut velocity.0;
     let delta = time.delta_secs();
     let (speed_x, speed_z) = (vel.x.abs(), vel.z.abs());
@@ -424,10 +419,6 @@ fn setup_player(
             parent
                 .spawn((
                     Camera3d::default(),
-                    PerspectiveProjection {
-                        fov: 90.0_f32.to_radians(),
-                        ..default()
-                    },
                     Camera {
                         hdr: true, // 1. HDR is required for bloom
                         ..default()
