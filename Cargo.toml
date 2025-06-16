@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bevy = { version = "0.16.1", features = ["dynamic_linking", "wayland"] }
 rand = "0.9.1"
+avian3d = { version = "0.3.1", features = [ "diagnostic_ui", ] }
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

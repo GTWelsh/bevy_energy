@@ -1,4 +1,12 @@
-use bevy::math::bounding::{Aabb3d, IntersectsVolume};
+mod diag;
+mod movement;
+
+use avian3d::PhysicsPlugins;
+use avian3d::math::Scalar;
+use avian3d::prelude::{
+    AngularVelocity, CoefficientCombine, Collider, ColliderConstructor,
+    ColliderConstructorHierarchy, Friction, GravityScale, Restitution, RigidBody,
+};
 use bevy::pbr::NotShadowCaster;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
@@ -9,17 +17,20 @@ use bevy::{
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default(),
+            movement::CharacterControllerPlugin,
+        ))
         .add_systems(Startup, (setup_floor, setup_player, add_cubes))
-        .add_systems(FixedUpdate, collision_detection)
         .add_systems(
             Update,
             (
                 hide_cursor,
                 (
                     (lean_camera, rotate_player, rotate_camera),
-                    (calc_new_velocity, update_aabb).chain(),
-                    move_player,
+                    calc_new_velocity,
+                    // move_player,
                 )
                     .chain(),
                 change_camera_keybind,
@@ -27,7 +38,7 @@ fn main() {
             ),
         )
         .add_observer(set_camera)
-        .insert_resource(FloorSize(20.0))
+        .insert_resource(FloorSize(100.0))
         .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
@@ -69,34 +80,6 @@ struct AimPoint(Vec3);
 #[derive(Component)]
 struct Lean(f32);
 
-fn update_aabb(mut items: Query<(&mut Collider, &Transform, Option<&Player>)>) {
-    for (mut collider, transform, maybe_player) in items.iter_mut() {
-        let scale = if let Some(_player) = maybe_player {
-            Vec3::new(0.5, 2., 0.5)
-        } else {
-            transform.scale
-        };
-
-        collider.0 = Aabb3d::new(transform.translation, scale / 2.);
-    }
-}
-
-fn collision_detection(mut q_colliders: Query<(Entity, &Collider)>) {
-    let mut iter = q_colliders.iter_combinations_mut();
-
-    while let Some([(e1, Collider(c1)), (e2, Collider(c2))]) = iter.fetch_next() {
-        if e1 == e2 {
-            continue;
-        }
-
-        let contact = c1.intersects(c2);
-
-        if contact {
-            info!("{} contacting {}", e1, e2);
-        }
-    }
-}
-
 fn hide_cursor(
     mut q_windows: Query<&mut Window, With<PrimaryWindow>>,
     mut lock_cursor: Local<bool>,
@@ -124,16 +107,11 @@ fn setup_floor(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn((
-        Mesh3d(
-            meshes.add(
-                Plane3d::default()
-                    .mesh()
-                    .size(floor_size.0, floor_size.0)
-                    .subdivisions((floor_size.0 / 5.0).floor() as u32),
-            ),
-        ),
+        Mesh3d(meshes.add(Cuboid::new(floor_size.0, 1., floor_size.0))),
         MeshMaterial3d(materials.add(Color::WHITE)),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, -1., 0.0),
+        RigidBody::Static,
+        Collider::cuboid(floor_size.0, 1., floor_size.0),
     ));
 }
 
@@ -387,16 +365,12 @@ fn set_camera(
     }
 }
 
-#[derive(Component)]
-struct Collider(Aabb3d);
-
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let height = 2.0;
-    let half_height = height / 2.;
     let radius = 0.5;
     let aimpoint = Vec3::new(0.0, 0.85, -10.0);
     let transform = Transform::from_translation(Vec3::new(radius, height / 2. + radius, radius));
@@ -410,10 +384,11 @@ fn setup_player(
             Velocity(Vec3::ZERO),
             AimPoint(aimpoint),
             Lean(0_f32),
-            Collider(Aabb3d::new(
-                transform.translation,
-                Vec3::new(radius, half_height + radius * 2., radius),
-            )),
+            movement::CharacterControllerBundle::new(Collider::capsule(radius, height))
+                .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+            Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
+            Restitution::ZERO.with_combine_rule(CoefficientCombine::Min),
+            GravityScale(2.0),
         ))
         .with_children(|parent| {
             parent
@@ -486,6 +461,8 @@ fn add_cubes(
         let half_floor_size = floor_size.0 / 2.0;
 
         let height = rand::random_range(1. ..5.);
+        let width = rand::random_range(1. ..5.);
+        let depth = rand::random_range(1. ..5.);
 
         let x: f32 =
             (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
@@ -493,21 +470,19 @@ fn add_cubes(
         let z: f32 =
             (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
 
-        let transform = Transform::from_xyz(x, y, z)
+        let transform = Transform::from_xyz(x, y + height, z)
             // .with_rotation(
             //     Quat::from_rotation_y(rand::random_range(0.0..TAU)))
-            .with_scale(Vec3::new(
-                rand::random_range(1. ..5.),
-                height,
-                rand::random_range(1. ..5.),
-            ));
+            .with_scale(Vec3::new(width, height, depth));
 
         commands.spawn((
+            RigidBody::Dynamic,
             Mesh3d(cube_mesh.clone()),
             MeshMaterial3d(cube_mat.clone()),
             transform,
+            AngularVelocity(Vec3::new(width, height, depth)),
             Cube,
-            Collider(Aabb3d::new(transform.translation, transform.scale / 2.)),
+            Collider::cuboid(1., 1., 1.), //ColliderConstructorHierarchy::new(ColliderConstructor::ConvexDecompositionFromMesh),
         ));
     }
 }
