@@ -1,11 +1,9 @@
-mod diag;
 mod movement;
 
 use avian3d::PhysicsPlugins;
 use avian3d::math::Scalar;
 use avian3d::prelude::{
-    AngularVelocity, CoefficientCombine, Collider, ColliderConstructor,
-    ColliderConstructorHierarchy, Friction, GravityScale, Restitution, RigidBody,
+    AngularVelocity, CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
 use bevy::pbr::NotShadowCaster;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
@@ -27,12 +25,7 @@ fn main() {
             Update,
             (
                 hide_cursor,
-                (
-                    (lean_camera, rotate_player, rotate_camera),
-                    calc_new_velocity,
-                    // move_player,
-                )
-                    .chain(),
+                (lean_camera, rotate_horizontal, look_vertical).chain(),
                 change_camera_keybind,
                 player_shoot,
             ),
@@ -61,9 +54,6 @@ struct CameraView(CameraViewType);
 
 #[derive(Component)]
 struct Player;
-
-#[derive(Component)]
-struct Velocity(Vec3);
 
 #[derive(Component)]
 struct PlayerCamera;
@@ -200,7 +190,7 @@ fn lean_camera(
     player_lean.0 = working_lean;
 }
 
-fn rotate_camera(
+fn look_vertical(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
@@ -223,7 +213,7 @@ fn rotate_camera(
     transform.rotate_x(rotation_amount_x.to_radians());
 }
 
-fn rotate_player(
+fn rotate_horizontal(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<Player>>,
@@ -232,81 +222,6 @@ fn rotate_player(
     let rotation_amount_y = -mouse_motion.delta.x * rotation_speed;
 
     transform.rotate_y(rotation_amount_y * time.delta_secs());
-}
-
-fn move_player(mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>) {
-    let (mut player, velocity) = player_query.single_mut().unwrap();
-
-    let Vec3 { x, y: _, z } = player.rotation.mul_vec3(velocity.0);
-    player.translation += Vec3::new(x, 0.0, z);
-}
-
-fn calc_new_velocity(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut player_velocity_query: Query<&mut Velocity, With<Player>>,
-    time: Res<Time>,
-) {
-    // configurables
-
-    // how much force the object uses to move
-    const ACCELERATION: f32 = 1.0;
-
-    // inverse drag - higher = less drag
-    const DRAG_COF_INV: f32 = 5.0;
-
-    let mut velocity = player_velocity_query.single_mut().unwrap();
-    let vel = &mut velocity.0;
-    let delta = time.delta_secs();
-    let (speed_x, speed_z) = (vel.x.abs(), vel.z.abs());
-    let drag_x = add_drag(vel.x, speed_x / DRAG_COF_INV);
-    let drag_z = add_drag(vel.z, speed_z / DRAG_COF_INV);
-
-    vel.x = if speed_x < drag_x {
-        0.0
-    } else {
-        vel.x + drag_x
-    };
-
-    vel.z = if speed_z < drag_z {
-        0.0
-    } else {
-        vel.z + drag_z
-    };
-
-    let mut new_vel = Vec3::ZERO;
-    if keyboard_input.pressed(KeyCode::KeyW) {
-        new_vel.z = -1f32;
-    }
-
-    if keyboard_input.pressed(KeyCode::KeyA) {
-        new_vel.x = -1f32;
-    }
-
-    if keyboard_input.pressed(KeyCode::KeyD) {
-        new_vel.x = 1f32;
-    }
-
-    if keyboard_input.pressed(KeyCode::KeyS) {
-        new_vel.z = 1f32;
-    }
-
-    if new_vel == Vec3::ZERO {
-        return;
-    }
-
-    let norm = new_vel.normalize();
-
-    vel.x += norm.x * ACCELERATION * delta;
-    vel.z += norm.z * ACCELERATION * delta;
-}
-
-fn add_drag(vel: f32, drag: f32) -> f32 {
-    match vel.partial_cmp(&0.0) {
-        Some(std::cmp::Ordering::Greater) => -drag,
-        Some(std::cmp::Ordering::Less) => drag,
-        Some(std::cmp::Ordering::Equal) => 0.0,
-        None => 0.0,
-    }
 }
 
 fn change_camera_keybind(
@@ -381,7 +296,6 @@ fn setup_player(
             MeshMaterial3d(materials.add(Color::WHITE)),
             Player,
             transform,
-            Velocity(Vec3::ZERO),
             AimPoint(aimpoint),
             Lean(0_f32),
             movement::CharacterControllerBundle::new(Collider::capsule(radius, height))

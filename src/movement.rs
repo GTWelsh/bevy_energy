@@ -210,6 +210,7 @@ fn movement(
         &JumpImpulse,
         &mut LinearVelocity,
         Has<Grounded>,
+        &Transform,
     )>,
 ) {
     // Precision is adjusted so that the example works with
@@ -217,15 +218,17 @@ fn movement(
     let delta_time = time.delta_secs();
 
     for event in movement_event_reader.read() {
-        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded) in
+        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded, transform) in
             &mut controllers
         {
             match event {
                 MovementAction::Move(direction) => {
                     let rotated_direction =
-                        Quat::default().mul_vec3(Vec3::new(direction.x, 0., direction.y));
+                        transform
+                            .rotation
+                            .mul_vec3(Vec3::new(direction.x, 0., -direction.y));
                     linear_velocity.x += rotated_direction.x * movement_acceleration.0 * delta_time;
-                    linear_velocity.z -= rotated_direction.y * movement_acceleration.0 * delta_time;
+                    linear_velocity.z += rotated_direction.z * movement_acceleration.0 * delta_time;
                 }
                 MovementAction::Jump => {
                     if is_grounded {
