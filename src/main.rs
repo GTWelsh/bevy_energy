@@ -75,7 +75,9 @@ fn hide_cursor(
     mut lock_cursor: Local<bool>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    let mut window = q_windows.single_mut().unwrap();
+    let Ok(mut window) = q_windows.single_mut() else {
+        return;
+    };
 
     if *lock_cursor {
         window.cursor_options.grab_mode = CursorGrabMode::Confined;
@@ -195,7 +197,7 @@ fn look_vertical(
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
 ) {
-    const LIMIT: f32 = 35_f32;
+    const LIMIT: f32 = 45_f32;
     const ZERO: f32 = 0_f32;
 
     let rotation_speed: f32 = 10_f32;
@@ -308,6 +310,12 @@ fn setup_player(
             parent
                 .spawn((
                     Camera3d::default(),
+                    Projection::Perspective(PerspectiveProjection {
+                        fov: 60_f32.to_radians(),
+                        aspect_ratio: 1.,
+                        near: 0.001,
+                        far: 1000.,
+                    }),
                     Camera {
                         hdr: true, // 1. HDR is required for bloom
                         ..default()
