@@ -301,7 +301,7 @@ fn setup_player(
             AimPoint(aimpoint),
             Lean(0_f32),
             movement::CharacterControllerBundle::new(Collider::capsule(radius, height))
-                .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+                .with_movement(25.0, 2., 0.85, 7.0, (30.0 as Scalar).to_radians()),
             Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
             Restitution::ZERO.with_combine_rule(CoefficientCombine::Min),
             GravityScale(2.0),

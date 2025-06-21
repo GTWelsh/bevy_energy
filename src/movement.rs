@@ -8,13 +8,16 @@ impl Plugin for CharacterControllerPlugin {
         app.add_event::<MovementAction>().add_systems(
             Update,
             (
-                keyboard_input,
-                gamepad_input,
-                update_grounded,
-                movement,
-                apply_movement_damping,
-            )
-                .chain(),
+                (
+                    keyboard_input,
+                    gamepad_input,
+                    update_grounded,
+                    movement,
+                    apply_movement_damping,
+                )
+                    .chain(),
+                sprint,
+            ),
         );
     }
 }
@@ -34,9 +37,18 @@ pub struct CharacterController;
 #[derive(Component)]
 #[component(storage = "SparseSet")]
 pub struct Grounded;
+
+/// A marker component indicating that an entity is sprinting
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct Sprinting;
+
 /// The acceleration used for character movement.
 #[derive(Component)]
 pub struct MovementAcceleration(Scalar);
+
+#[derive(Component)]
+pub struct SprintFactor(Scalar);
 
 /// The damping factor used for slowing down movement.
 #[derive(Component)]
@@ -68,6 +80,7 @@ pub struct CharacterControllerBundle {
 #[derive(Bundle)]
 pub struct MovementBundle {
     acceleration: MovementAcceleration,
+    sprint_factor: SprintFactor,
     damping: MovementDampingFactor,
     jump_impulse: JumpImpulse,
     max_slope_angle: MaxSlopeAngle,
@@ -76,12 +89,14 @@ pub struct MovementBundle {
 impl MovementBundle {
     pub const fn new(
         acceleration: Scalar,
+        sprint_factor: Scalar,
         damping: Scalar,
         jump_impulse: Scalar,
         max_slope_angle: Scalar,
     ) -> Self {
         Self {
             acceleration: MovementAcceleration(acceleration),
+            sprint_factor: SprintFactor(sprint_factor),
             damping: MovementDampingFactor(damping),
             jump_impulse: JumpImpulse(jump_impulse),
             max_slope_angle: MaxSlopeAngle(max_slope_angle),
@@ -91,7 +106,7 @@ impl MovementBundle {
 
 impl Default for MovementBundle {
     fn default() -> Self {
-        Self::new(30.0, 0.9, 7.0, PI * 0.45)
+        Self::new(30.0, 1.5, 0.9, 7.0, PI * 0.45)
     }
 }
 
@@ -120,11 +135,18 @@ impl CharacterControllerBundle {
     pub fn with_movement(
         mut self,
         acceleration: Scalar,
+        sprint_factor: Scalar,
         damping: Scalar,
         jump_impulse: Scalar,
         max_slope_angle: Scalar,
     ) -> Self {
-        self.movement = MovementBundle::new(acceleration, damping, jump_impulse, max_slope_angle);
+        self.movement = MovementBundle::new(
+            acceleration,
+            sprint_factor,
+            damping,
+            jump_impulse,
+            max_slope_angle,
+        );
         self
     }
 }
@@ -134,7 +156,6 @@ fn keyboard_input(
     mut movement_event_writer: EventWriter<MovementAction>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    //TODO: move to main file, that makes accessing the rotation easy
     let up = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
     let down = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
     let left = keyboard_input.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
@@ -201,25 +222,50 @@ fn update_grounded(
     }
 }
 
+fn sprint(
+    mut commands: Commands,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    player_query: Query<Entity, With<CharacterController>>,
+) {
+    for entity in player_query {
+        if keyboard_input.just_pressed(KeyCode::ShiftLeft) {
+            commands.entity(entity).insert(Sprinting);
+        } else if keyboard_input.just_released(KeyCode::ShiftLeft) {
+            commands.entity(entity).remove::<Sprinting>();
+        }
+    }
+}
+
+type MovementQuery<'a> = (
+    &'a MovementAcceleration,
+    &'a SprintFactor,
+    &'a JumpImpulse,
+    &'a mut LinearVelocity,
+    Has<Grounded>,
+    Option<&'a Sprinting>,
+    &'a Transform,
+);
+
 /// Responds to [`MovementAction`] events and moves character controllers accordingly.
 fn movement(
     time: Res<Time>,
     mut movement_event_reader: EventReader<MovementAction>,
-    mut controllers: Query<(
-        &MovementAcceleration,
-        &JumpImpulse,
-        &mut LinearVelocity,
-        Has<Grounded>,
-        &Transform,
-    )>,
+    mut controllers: Query<MovementQuery>,
 ) {
     // Precision is adjusted so that the example works with
     // both the `f32` and `f64` features. Otherwise you don't need this.
     let delta_time = time.delta_secs();
 
     for event in movement_event_reader.read() {
-        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded, transform) in
-            &mut controllers
+        for (
+            movement_acceleration,
+            sprint_factor,
+            jump_impulse,
+            mut linear_velocity,
+            is_grounded,
+            maybe_sprinting,
+            transform,
+        ) in &mut controllers
         {
             match event {
                 MovementAction::Move(direction) => {
@@ -227,8 +273,15 @@ fn movement(
                         transform
                             .rotation
                             .mul_vec3(Vec3::new(direction.x, 0., -direction.y));
-                    linear_velocity.x += rotated_direction.x * movement_acceleration.0 * delta_time;
-                    linear_velocity.z += rotated_direction.z * movement_acceleration.0 * delta_time;
+
+                    let mut accel = movement_acceleration.0;
+
+                    if maybe_sprinting.is_some() {
+                        accel *= sprint_factor.0;
+                    }
+
+                    linear_velocity.x += rotated_direction.x * accel * delta_time;
+                    linear_velocity.z += rotated_direction.z * accel * delta_time;
                 }
                 MovementAction::Jump => {
                     if is_grounded {
