@@ -124,6 +124,8 @@ fn player_shoot(
         Mesh3d(meshes.add(Sphere::new(0.05))),
         MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_xyz(x, y, z),
+        RigidBody::Dynamic,
+        Collider::sphere(0.05)
     ));
 }
 
