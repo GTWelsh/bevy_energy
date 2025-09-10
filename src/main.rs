@@ -31,7 +31,7 @@ fn main() {
             ),
         )
         .add_observer(set_camera)
-        .insert_resource(FloorSize(100.0))
+        .insert_resource(FloorSize(20.0))
         .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
@@ -98,12 +98,13 @@ fn setup_floor(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let floor_size_value: f32 = floor_size.0;
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(floor_size.0, 1., floor_size.0))),
+        Mesh3d(meshes.add(Cuboid::new(floor_size_value, 1., floor_size_value))),
         MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_xyz(0.0, -1., 0.0),
         RigidBody::Static,
-        Collider::cuboid(floor_size.0, 1., floor_size.0),
+        Collider::cuboid(floor_size_value, 1., floor_size_value),
     ));
 }
 
@@ -125,7 +126,7 @@ fn player_shoot(
         MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_xyz(x, y, z),
         RigidBody::Dynamic,
-        Collider::sphere(0.05)
+        Collider::sphere(0.05),
     ));
 }
 
