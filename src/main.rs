@@ -1,11 +1,15 @@
 mod movement;
 
+use std::f32::consts::PI;
+
 use avian3d::PhysicsPlugins;
 use avian3d::math::Scalar;
 use avian3d::prelude::{
     AngularVelocity, CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
-use bevy::pbr::NotShadowCaster;
+use bevy::pbr::light_consts::lux;
+use bevy::pbr::{Atmosphere, CascadeShadowConfigBuilder, NotShadowCaster};
+use bevy::render::camera::Exposure;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
@@ -20,7 +24,7 @@ fn main() {
             PhysicsPlugins::default(),
             movement::CharacterControllerPlugin,
         ))
-        .add_systems(Startup, (setup_floor, setup_player, add_cubes))
+        .add_systems(Startup, (setup_floor, setup_player, add_cubes, setup_atmos))
         .add_systems(
             Update,
             (
@@ -28,12 +32,92 @@ fn main() {
                 (lean_camera, rotate_horizontal, look_vertical).chain(),
                 change_camera_keybind,
                 player_shoot,
+                dynamic_scene,
             ),
         )
         .add_observer(set_camera)
-        .insert_resource(FloorSize(20.0))
+        .insert_resource(FloorSize(20000.0))
         .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
+}
+
+fn dynamic_scene(mut suns: Query<&mut Transform, With<DirectionalLight>>, time: Res<Time>) {
+    suns.iter_mut()
+        .for_each(|mut tf| tf.rotate_x(-time.delta_secs() * PI / 200.0));
+}
+
+fn setup_atmos(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cascade_shadow_config = CascadeShadowConfigBuilder {
+        first_cascade_far_bound: 10.0,
+        maximum_distance: 100.0,
+        ..default()
+    }
+    .build();
+
+    // Sun
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            // lux::RAW_SUNLIGHT is recommended for use with this feature, since
+            // other values approximate sunlight *post-scattering* in various
+            // conditions. RAW_SUNLIGHT in comparison is the illuminance of the
+            // sun unfiltered by the atmosphere, so it is the proper input for
+            // sunlight to be filtered by the atmosphere.
+            illuminance: lux::DIRECT_SUNLIGHT,
+            ..default()
+        },
+        Transform::from_xyz(3.0, 5.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        cascade_shadow_config,
+    ));
+
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 3000.0,
+        ..default()
+    });
+
+    // commands.spawn((
+    //     DirectionalLight {
+    //         shadows_enabled: false,
+    //         // lux::RAW_SUNLIGHT is recommended for use with this feature, since
+    //         // other values approximate sunlight *post-scattering* in various
+    //         // conditions. RAW_SUNLIGHT in comparison is the illuminance of the
+    //         // sun unfiltered by the atmosphere, so it is the proper input for
+    //         // sunlight to be filtered by the atmosphere.
+    //         illuminance: lux::AMBIENT_DAYLIGHT,
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(1.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // ));
+
+    let sphere_mesh = meshes.add(Mesh::from(Sphere { radius: 1.0 }));
+
+    // light probe spheres
+    commands.spawn((
+        Mesh3d(sphere_mesh.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            metallic: 1.0,
+            perceptual_roughness: 0.0,
+            ..default()
+        })),
+        Transform::from_xyz(-0.3, 0.1, -2.0).with_scale(Vec3::splat(0.5)),
+    ));
+
+    commands.spawn((
+        Mesh3d(sphere_mesh.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            metallic: 0.0,
+            perceptual_roughness: 1.0,
+            ..default()
+        })),
+        Transform::from_xyz(-0.3, 0.1, 2.0).with_scale(Vec3::splat(0.5)),
+    ));
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -323,7 +407,9 @@ fn setup_player(
                         hdr: true, // 1. HDR is required for bloom
                         ..default()
                     },
-                    Tonemapping::TonyMcMapface, // 2. Using a tonemapper that desaturates to white is recommended
+                    Atmosphere::EARTH,
+                    Exposure::SUNLIGHT,
+                    Tonemapping::AcesFitted,
                     Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
                     Bloom::NATURAL,
                     PlayerCamera,
@@ -364,8 +450,8 @@ fn add_cubes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let size_mutli = 10.0;
-    let density = 5.0 / size_mutli;
+    let size_mutli = 2.0;
+    let density = 0.3 / size_mutli;
     let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
     let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
     let cube_type_range = 0..10;
