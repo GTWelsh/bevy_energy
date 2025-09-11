@@ -24,7 +24,10 @@ fn main() {
             PhysicsPlugins::default(),
             movement::CharacterControllerPlugin,
         ))
-        .add_systems(Startup, (setup_floor, setup_player, add_cubes, setup_atmos))
+        .add_systems(
+            Startup,
+            (setup_floor, setup_player, add_cubes_two, setup_atmos),
+        )
         .add_systems(
             Update,
             (
@@ -36,7 +39,7 @@ fn main() {
             ),
         )
         .add_observer(set_camera)
-        .insert_resource(FloorSize(20000.0))
+        .insert_resource(FloorSize(100.0))
         .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
@@ -442,6 +445,62 @@ fn setup_player(
         });
 
     commands.trigger(SetCameraView(CameraViewType::FirstPerson));
+}
+
+fn add_cubes_two(
+    mut commands: Commands,
+    floor_size_res: Res<FloorSize>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let floor_size = floor_size_res.0;
+
+    let wall_mesh_x = meshes.add(Cuboid::new(floor_size, 1.0, 1.0));
+    let wall_mesh_y = meshes.add(Cuboid::new(1.0, 1.0, floor_size));
+
+    let cube_mat = materials.add(Color::srgb_u8(124, 144, 255));
+
+    let transform_t = Transform::from_xyz(0.0, 0.0, floor_size / 2.0);
+    let transform_b = Transform::from_xyz(0.0, 0.0, -floor_size / 2.0);
+
+    let transform_l = Transform::from_xyz(floor_size / 2., 0.0, 0.0);
+    let transform_r = Transform::from_xyz(-floor_size / 2., 0.0, 0.0);
+
+    commands.spawn((
+        RigidBody::Static,
+        Mesh3d(wall_mesh_x.clone()),
+        MeshMaterial3d(cube_mat.clone()),
+        transform_t,
+        Cube,
+        Collider::cuboid(floor_size, 1., 1.),
+    ));
+
+    commands.spawn((
+        RigidBody::Static,
+        Mesh3d(wall_mesh_x.clone()),
+        MeshMaterial3d(cube_mat.clone()),
+        transform_b,
+        Cube,
+        Collider::cuboid(floor_size, 1., 1.),
+    ));
+
+    commands.spawn((
+        RigidBody::Static,
+        Mesh3d(wall_mesh_y.clone()),
+        MeshMaterial3d(cube_mat.clone()),
+        transform_l,
+        Cube,
+        Collider::cuboid(1., 1., floor_size),
+    ));
+
+    commands.spawn((
+        RigidBody::Static,
+        Mesh3d(wall_mesh_y.clone()),
+        MeshMaterial3d(cube_mat.clone()),
+        transform_r,
+        Cube,
+        Collider::cuboid(1., 1., floor_size),
+    ));
 }
 
 fn add_cubes(
