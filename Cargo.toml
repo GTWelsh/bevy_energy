@@ -9,6 +9,7 @@ bevy = { version = "0.16.1", features = ["dynamic_linking"] }
 #wayland-sys = {version = "0.31", features = ["dlopen"]}
 rand = "0.9.1"
 avian3d = { version = "0.3.1", features = [ "diagnostic_ui", ] }
+bevy_dev_tools = "0.16.1"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

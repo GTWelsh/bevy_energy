@@ -1,7 +1,5 @@
 mod movement;
 
-use std::f32::consts::PI;
-
 use avian3d::PhysicsPlugins;
 use avian3d::math::Scalar;
 use avian3d::prelude::{
@@ -10,23 +8,51 @@ use avian3d::prelude::{
 use bevy::pbr::light_consts::lux;
 use bevy::pbr::{Atmosphere, CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::render::camera::Exposure;
+use bevy::text::FontSmoothing;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
 };
+use bevy_dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+use std::f32::consts::PI;
+
+struct OverlayColor;
+
+impl OverlayColor {
+    const RED: Color = Color::srgb(1.0, 0.0, 0.0);
+    const GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
+}
 
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
+            FpsOverlayPlugin {
+                config: FpsOverlayConfig {
+                    text_config: TextFont {
+                        // Here we define size of our overlay
+                        font_size: 42.0,
+                        // If we want, we can use a custom font
+                        font: default(),
+                        // We could also disable font smoothing,
+                        font_smoothing: FontSmoothing::default(),
+                        ..default()
+                    },
+                    // We can also change color of the overlay
+                    text_color: OverlayColor::GREEN,
+                    // We can also set the refresh interval for the FPS counter
+                    refresh_interval: core::time::Duration::from_millis(100),
+                    enabled: true,
+                },
+            },
             PhysicsPlugins::default(),
             movement::CharacterControllerPlugin,
         ))
         .add_systems(
             Startup,
-            (setup_floor, setup_player, add_cubes_two, setup_atmos),
+            (setup_floor, setup_player, add_border, setup_atmos),
         )
         .add_systems(
             Update,
@@ -49,11 +75,7 @@ fn dynamic_scene(mut suns: Query<&mut Transform, With<DirectionalLight>>, time: 
         .for_each(|mut tf| tf.rotate_x(-time.delta_secs() * PI / 200.0));
 }
 
-fn setup_atmos(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup_atmos(mut commands: Commands) {
     let cascade_shadow_config = CascadeShadowConfigBuilder {
         first_cascade_far_bound: 10.0,
         maximum_distance: 100.0,
@@ -65,11 +87,6 @@ fn setup_atmos(
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
-            // lux::RAW_SUNLIGHT is recommended for use with this feature, since
-            // other values approximate sunlight *post-scattering* in various
-            // conditions. RAW_SUNLIGHT in comparison is the illuminance of the
-            // sun unfiltered by the atmosphere, so it is the proper input for
-            // sunlight to be filtered by the atmosphere.
             illuminance: lux::DIRECT_SUNLIGHT,
             ..default()
         },
@@ -82,45 +99,6 @@ fn setup_atmos(
         brightness: 3000.0,
         ..default()
     });
-
-    // commands.spawn((
-    //     DirectionalLight {
-    //         shadows_enabled: false,
-    //         // lux::RAW_SUNLIGHT is recommended for use with this feature, since
-    //         // other values approximate sunlight *post-scattering* in various
-    //         // conditions. RAW_SUNLIGHT in comparison is the illuminance of the
-    //         // sun unfiltered by the atmosphere, so it is the proper input for
-    //         // sunlight to be filtered by the atmosphere.
-    //         illuminance: lux::AMBIENT_DAYLIGHT,
-    //         ..default()
-    //     },
-    //     Transform::from_xyz(1.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-    // ));
-
-    let sphere_mesh = meshes.add(Mesh::from(Sphere { radius: 1.0 }));
-
-    // light probe spheres
-    commands.spawn((
-        Mesh3d(sphere_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            metallic: 1.0,
-            perceptual_roughness: 0.0,
-            ..default()
-        })),
-        Transform::from_xyz(-0.3, 0.1, -2.0).with_scale(Vec3::splat(0.5)),
-    ));
-
-    commands.spawn((
-        Mesh3d(sphere_mesh.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            metallic: 0.0,
-            perceptual_roughness: 1.0,
-            ..default()
-        })),
-        Transform::from_xyz(-0.3, 0.1, 2.0).with_scale(Vec3::splat(0.5)),
-    ));
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -189,7 +167,7 @@ fn setup_floor(
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(floor_size_value, 1., floor_size_value))),
         MeshMaterial3d(materials.add(Color::WHITE)),
-        Transform::from_xyz(0.0, -1., 0.0),
+        Transform::from_xyz(0.0, 0.0, 0.0),
         RigidBody::Static,
         Collider::cuboid(floor_size_value, 1., floor_size_value),
     ));
@@ -290,7 +268,7 @@ fn look_vertical(
     const LIMIT: f32 = 45_f32;
     const ZERO: f32 = 0_f32;
 
-    let rotation_speed: f32 = 10_f32;
+    let rotation_speed: f32 = 6_f32;
     let rotation_amount_x = (-mouse_motion.delta.y * rotation_speed) * time.delta_secs();
     let positive_rot = rotation_amount_x > ZERO;
     let negative_rot = rotation_amount_x < ZERO;
@@ -310,7 +288,7 @@ fn rotate_horizontal(
     time: Res<Time>,
     mut transform: Single<&mut Transform, With<Player>>,
 ) {
-    let rotation_speed: f32 = 0.5;
+    let rotation_speed: f32 = 0.2;
     let rotation_amount_y = -mouse_motion.delta.x * rotation_speed;
 
     transform.rotate_y(rotation_amount_y * time.delta_secs());
@@ -447,16 +425,17 @@ fn setup_player(
     commands.trigger(SetCameraView(CameraViewType::FirstPerson));
 }
 
-fn add_cubes_two(
+fn add_border(
     mut commands: Commands,
     floor_size_res: Res<FloorSize>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let floor_size = floor_size_res.0;
+    const HEIGHT: f32 = 10.0;
 
-    let wall_mesh_x = meshes.add(Cuboid::new(floor_size, 1.0, 1.0));
-    let wall_mesh_y = meshes.add(Cuboid::new(1.0, 1.0, floor_size));
+    let wall_mesh_x = meshes.add(Cuboid::new(floor_size, HEIGHT, 1.0));
+    let wall_mesh_y = meshes.add(Cuboid::new(1.0, HEIGHT, floor_size));
 
     let cube_mat = materials.add(Color::srgb_u8(124, 144, 255));
 
@@ -501,58 +480,4 @@ fn add_cubes_two(
         Cube,
         Collider::cuboid(1., 1., floor_size),
     ));
-}
-
-fn add_cubes(
-    mut commands: Commands,
-    floor_size: Res<FloorSize>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let size_mutli = 2.0;
-    let density = 0.3 / size_mutli;
-    let max_number_of_cubes = (floor_size.0.floor() * density) as i32;
-    let actual_number_of_cubes = rand::random_range(1..max_number_of_cubes);
-    let cube_type_range = 0..10;
-    let mut cube_meshes: Vec<Handle<Mesh>> = Vec::with_capacity(5);
-
-    for _i in cube_type_range {
-        let mesh = Cuboid::new(1., 1., 1.);
-        cube_meshes.push(meshes.add(mesh));
-    }
-
-    let cube_mat = materials.add(Color::srgb_u8(124, 144, 255));
-
-    let range_of_all_cubes = 1..actual_number_of_cubes;
-
-    for _i in range_of_all_cubes {
-        let cube_mesh = &cube_meshes[rand::random_range(0..10)];
-
-        let half_floor_size = floor_size.0 / 2.0;
-
-        let height = rand::random_range(1. ..5.);
-        let width = rand::random_range(1. ..5.);
-        let depth = rand::random_range(1. ..5.);
-
-        let x: f32 =
-            (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
-        let y: f32 = height / 2.;
-        let z: f32 =
-            (rand::random_range(0.0..floor_size.0) - half_floor_size).clamp(0_f32, floor_size.0);
-
-        let transform = Transform::from_xyz(x, y + height, z)
-            // .with_rotation(
-            //     Quat::from_rotation_y(rand::random_range(0.0..TAU)))
-            .with_scale(Vec3::new(width, height, depth));
-
-        commands.spawn((
-            RigidBody::Dynamic,
-            Mesh3d(cube_mesh.clone()),
-            MeshMaterial3d(cube_mat.clone()),
-            transform,
-            AngularVelocity(Vec3::new(width, height, depth)),
-            Cube,
-            Collider::cuboid(1., 1., 1.), //ColliderConstructorHierarchy::new(ColliderConstructor::ConvexDecompositionFromMesh),
-        ));
-    }
 }
