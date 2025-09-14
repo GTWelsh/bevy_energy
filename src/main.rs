@@ -3,50 +3,25 @@ mod movement;
 use avian3d::PhysicsPlugins;
 use avian3d::math::Scalar;
 use avian3d::prelude::{
-    AngularVelocity, CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
+    CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
 use bevy::pbr::light_consts::lux;
 use bevy::pbr::{Atmosphere, CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::render::camera::Exposure;
-use bevy::text::FontSmoothing;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
 };
-use bevy_dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+use bevy_dev_tools::fps_overlay::FpsOverlayPlugin;
 use std::f32::consts::PI;
-
-struct OverlayColor;
-
-impl OverlayColor {
-    const RED: Color = Color::srgb(1.0, 0.0, 0.0);
-    const GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
-}
 
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            FpsOverlayPlugin {
-                config: FpsOverlayConfig {
-                    text_config: TextFont {
-                        // Here we define size of our overlay
-                        font_size: 42.0,
-                        // If we want, we can use a custom font
-                        font: default(),
-                        // We could also disable font smoothing,
-                        font_smoothing: FontSmoothing::default(),
-                        ..default()
-                    },
-                    // We can also change color of the overlay
-                    text_color: OverlayColor::GREEN,
-                    // We can also set the refresh interval for the FPS counter
-                    refresh_interval: core::time::Duration::from_millis(100),
-                    enabled: true,
-                },
-            },
+            FpsOverlayPlugin::default(),
             PhysicsPlugins::default(),
             movement::CharacterControllerPlugin,
         ))
@@ -170,6 +145,18 @@ fn setup_floor(
         Transform::from_xyz(0.0, 0.0, 0.0),
         RigidBody::Static,
         Collider::cuboid(floor_size_value, 1., floor_size_value),
+    ));
+
+    // ocean so we don't see the infinite blackness
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(5000.0, 5000.0))),
+        MeshMaterial3d(materials.add(Color::Srgba(Srgba {
+            red: 0.0,
+            green: 0.45,
+            blue: 0.6,
+            alpha: 1.0,
+        }))),
+        Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 }
 
@@ -354,10 +341,11 @@ fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let height = 2.0;
     let radius = 0.5;
-    let aimpoint = Vec3::new(0.0, 0.85, -10.0);
+    let aimpoint = Vec3::new(0.0, 35.0, -300.0);
     let transform = Transform::from_translation(Vec3::new(radius, height / 2. + radius, radius));
 
     commands
@@ -379,8 +367,8 @@ fn setup_player(
                 .spawn((
                     Camera3d::default(),
                     Projection::Perspective(PerspectiveProjection {
-                        fov: 60_f32.to_radians(),
-                        aspect_ratio: 1.,
+                        fov: 36_f32.to_radians(),
+                        aspect_ratio: 16. / 9.,
                         near: 0.001,
                         far: 1000.,
                     }),
@@ -396,19 +384,12 @@ fn setup_player(
                     PlayerCamera,
                 ))
                 .with_children(|parent_camera| {
-                    let weapon_length = 1.0;
-                    let weapon_radius = 0.05;
-                    let actual_weapon_length = weapon_length - weapon_radius * 2.0;
-
                     parent_camera.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(
-                            weapon_radius,
-                            weapon_radius,
-                            actual_weapon_length,
-                        ))),
-                        MeshMaterial3d(materials.add(Color::WHITE)),
-                        Transform::from_xyz(0.05, -0.1, 0.0).looking_at(aimpoint, Vec3::Y),
-                        NotShadowCaster,
+                        SceneRoot(
+                            asset_server
+                                .load(GltfAssetLabel::Scene(0).from_asset("weapons/mpx/main.glb")),
+                        ),
+                        Transform::from_xyz(0.0, -0.07, -0.3).looking_to(Vec3::NEG_Z, Vec3::Y),
                         PlayerWeapon,
                     ));
                 });
@@ -432,7 +413,7 @@ fn add_border(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let floor_size = floor_size_res.0;
-    const HEIGHT: f32 = 10.0;
+    const HEIGHT: f32 = 2.0;
 
     let wall_mesh_x = meshes.add(Cuboid::new(floor_size, HEIGHT, 1.0));
     let wall_mesh_y = meshes.add(Cuboid::new(1.0, HEIGHT, floor_size));
@@ -451,7 +432,7 @@ fn add_border(
         MeshMaterial3d(cube_mat.clone()),
         transform_t,
         Cube,
-        Collider::cuboid(floor_size, 1., 1.),
+        Collider::cuboid(floor_size, HEIGHT, 1.),
     ));
 
     commands.spawn((
@@ -460,7 +441,7 @@ fn add_border(
         MeshMaterial3d(cube_mat.clone()),
         transform_b,
         Cube,
-        Collider::cuboid(floor_size, 1., 1.),
+        Collider::cuboid(floor_size, HEIGHT, 1.),
     ));
 
     commands.spawn((
@@ -469,7 +450,7 @@ fn add_border(
         MeshMaterial3d(cube_mat.clone()),
         transform_l,
         Cube,
-        Collider::cuboid(1., 1., floor_size),
+        Collider::cuboid(1., HEIGHT, floor_size),
     ));
 
     commands.spawn((
@@ -478,6 +459,6 @@ fn add_border(
         MeshMaterial3d(cube_mat.clone()),
         transform_r,
         Cube,
-        Collider::cuboid(1., 1., floor_size),
+        Collider::cuboid(1., HEIGHT, floor_size),
     ));
 }
