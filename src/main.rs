@@ -6,7 +6,7 @@ use avian3d::prelude::{
     CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
 use bevy::pbr::light_consts::lux;
-use bevy::pbr::{Atmosphere, CascadeShadowConfigBuilder, NotShadowCaster};
+use bevy::pbr::{Atmosphere, CascadeShadowConfigBuilder};
 use bevy::render::camera::Exposure;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::{
@@ -52,8 +52,6 @@ fn dynamic_scene(mut suns: Query<&mut Transform, With<DirectionalLight>>, time: 
 
 fn setup_atmos(mut commands: Commands) {
     let cascade_shadow_config = CascadeShadowConfigBuilder {
-        first_cascade_far_bound: 10.0,
-        maximum_distance: 100.0,
         ..default()
     }
     .build();
