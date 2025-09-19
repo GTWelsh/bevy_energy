@@ -12,8 +12,7 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (setup_floor, add_border, setup_atmos))
             .add_systems(Update, (hide_cursor, dynamic_scene))
-            .insert_resource(FloorSize(100.0))
-            .run();
+            .insert_resource(FloorSize(100.0));
     }
 }
 
