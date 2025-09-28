@@ -29,27 +29,12 @@ fn main() {
             Update,
             (
                 (lean_camera, rotate_horizontal, look_vertical).chain(),
-                change_camera_keybind,
                 player_shoot,
+                aim,
             ),
         )
-        .add_observer(set_camera)
-        .insert_resource(CameraView(CameraViewType::FirstPerson))
         .run();
 }
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum CameraViewType {
-    TopDown,
-    ThirdPerson,
-    FirstPerson,
-}
-
-#[derive(Event)]
-struct SetCameraView(CameraViewType);
-
-#[derive(Resource)]
-struct CameraView(CameraViewType);
 
 #[derive(Component)]
 struct Player;
@@ -59,9 +44,6 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
-
-#[derive(Component)]
-struct AimPoint(Vec3);
 
 #[derive(Component)]
 struct Lean(f32);
@@ -86,6 +68,28 @@ fn player_shoot(
         RigidBody::Dynamic,
         Collider::sphere(0.05),
     ));
+}
+
+fn aim(
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    mut weapon_query: Query<
+        (&mut Transform, &DefaultTransform, &SightOffsetTransform),
+        (With<PlayerWeapon>, With<WeaponActive>),
+    >,
+    mut alpha: Local<Option<f32>>,
+) {
+    let alpha_value = alpha.unwrap_or(0.0);
+
+    for (mut trans, def_trans, sight_trans) in &mut weapon_query {
+        let target = if mouse_input.pressed(MouseButton::Right) {
+            sight_trans.0
+        } else {
+            def_trans.0
+        };
+
+        trans.translation = trans.translation.lerp(target, alpha_value);
+        *alpha = Some(0.1);
+    }
 }
 
 fn lean_camera(
@@ -187,61 +191,14 @@ fn rotate_horizontal(
     transform.rotate_y(rotation_amount_y * time.delta_secs());
 }
 
-fn change_camera_keybind(
-    mut commands: Commands,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut camera_view: ResMut<CameraView>,
-) {
-    if !keyboard_input.just_pressed(KeyCode::KeyV) {
-        return;
-    }
+#[derive(Component)]
+struct SightOffsetTransform(Vec3);
 
-    let view_modes = [
-        CameraViewType::TopDown,
-        CameraViewType::ThirdPerson,
-        CameraViewType::FirstPerson,
-    ];
-    let view_index = view_modes.iter().position(|v| *v == camera_view.0);
+#[derive(Component)]
+struct DefaultTransform(Vec3);
 
-    let mut next_view_index = if let Some(i) = view_index { i + 1 } else { 0 };
-
-    if next_view_index >= view_modes.len() {
-        next_view_index = 0;
-    }
-
-    camera_view.0 = view_modes[next_view_index];
-
-    commands.trigger(SetCameraView(camera_view.0));
-}
-
-fn set_camera(
-    trigger: Trigger<SetCameraView>,
-    mut camera: Single<&mut Transform, With<PlayerCamera>>,
-    aimpoint: Single<&AimPoint, With<Player>>,
-) {
-    let view = trigger.event().0;
-
-    if view == CameraViewType::TopDown {
-        camera.translation.x = 0.0;
-        camera.translation.y = 30.0;
-        camera.translation.z = 0.0;
-        camera.look_at(Vec3::NEG_Z, Vec3::Y);
-    }
-
-    if view == CameraViewType::ThirdPerson {
-        camera.translation.x = 0.0;
-        camera.translation.y = 1.0;
-        camera.translation.z = 6.0;
-        camera.look_at(Vec3::NEG_Z, Vec3::Y);
-    }
-
-    if view == CameraViewType::FirstPerson {
-        camera.translation.x = 0.0;
-        camera.translation.y = 0.85;
-        camera.translation.z = -0.51;
-        camera.look_at(aimpoint.0, Vec3::Y);
-    }
-}
+#[derive(Component)]
+struct WeaponActive;
 
 fn setup_player(
     mut commands: Commands,
@@ -251,7 +208,6 @@ fn setup_player(
 ) {
     let height = 2.0;
     let radius = 0.5;
-    let aimpoint = Vec3::new(0.0, 35.0, -300.0);
     let transform = Transform::from_translation(Vec3::new(radius, height / 2. + radius, radius));
 
     commands
@@ -260,7 +216,6 @@ fn setup_player(
             MeshMaterial3d(materials.add(Color::WHITE)),
             Player,
             transform,
-            AimPoint(aimpoint),
             Lean(0_f32),
             movement::CharacterControllerBundle::new(Collider::capsule(radius, height))
                 .with_movement(25.0, 2., 0.85, 7.0, (30.0 as Scalar).to_radians()),
@@ -285,7 +240,7 @@ fn setup_player(
                     Atmosphere::EARTH,
                     Exposure::SUNLIGHT,
                     Tonemapping::AcesFitted,
-                    Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
+                    Transform::from_xyz(0.0, 0.85, -0.51).looking_to(Vec3::NEG_Z, Vec3::Y),
                     Bloom::NATURAL,
                     PlayerCamera,
                 ))
@@ -295,8 +250,11 @@ fn setup_player(
                             asset_server
                                 .load(GltfAssetLabel::Scene(0).from_asset("weapons/mpx/main.glb")),
                         ),
-                        Transform::from_xyz(0.0, -0.07, -0.3).looking_to(Vec3::NEG_Z, Vec3::Y),
+                        Transform::from_xyz(0.1, -0.1, -0.5).looking_to(Vec3::NEG_Z, Vec3::Y),
                         PlayerWeapon,
+                        WeaponActive,
+                        DefaultTransform(Vec3::new(0.1, -0.1, -0.5)),
+                        SightOffsetTransform(Vec3::new(0.0, -0.07, -0.3)),
                     ));
                 });
 
@@ -308,6 +266,4 @@ fn setup_player(
                 Transform::from_xyz(0.0, 0.5, 0.0),
             ));
         });
-
-    commands.trigger(SetCameraView(CameraViewType::FirstPerson));
 }
