@@ -76,10 +76,7 @@ fn aim(
         (&mut Transform, &DefaultTransform, &SightOffsetTransform),
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
-    mut alpha: Local<Option<f32>>,
 ) {
-    let alpha_value = alpha.unwrap_or(0.0);
-
     for (mut trans, def_trans, sight_trans) in &mut weapon_query {
         let target = if mouse_input.pressed(MouseButton::Right) {
             sight_trans.0
@@ -87,8 +84,7 @@ fn aim(
             def_trans.0
         };
 
-        trans.translation = trans.translation.lerp(target, alpha_value);
-        *alpha = Some(0.1);
+        trans.translation = trans.translation.lerp(target, 0.1);
     }
 }
 
