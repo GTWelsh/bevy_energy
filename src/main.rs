@@ -7,7 +7,8 @@ use avian3d::prelude::{
     CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
 use bevy::pbr::Atmosphere;
-use bevy::render::camera::Exposure;
+use bevy::render::camera::{Exposure, RenderTarget};
+use bevy::window::WindowRef;
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     input::mouse::AccumulatedMouseMotion,
@@ -24,13 +25,14 @@ fn main() {
             scene::ScenePlugin,
             movement::CharacterControllerPlugin,
         ))
-        .add_systems(Startup, setup_player)
+        .add_systems(Startup, (setup_player, setup_free_cam).chain())
         .add_systems(
             Update,
             (
                 (lean_camera, rotate_horizontal, look_vertical).chain(),
                 player_shoot,
                 aim,
+               select_camera, 
             ),
         )
         .run();
@@ -84,7 +86,7 @@ fn aim(
             def_trans.0
         };
 
-        trans.translation = trans.translation.lerp(target, 0.1);
+        trans.translation = trans.translation.lerp(target, 0.2);
     }
 }
 
@@ -94,7 +96,7 @@ fn lean_camera(
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
     mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
 ) {
-    let rotation_point = Vec3::new(0_f32, 0_f32, transform.translation.z);
+    let rotation_point = Vec3::new(transform.translation.x, transform.translation.y - 2.0, transform.translation.z);
     let max_lean = 30_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
     let leaning_right = player_lean.0 > 0_f32;
@@ -195,6 +197,51 @@ struct DefaultTransform(Vec3);
 
 #[derive(Component)]
 struct WeaponActive;
+
+#[derive(Component)]
+struct FreeCamera;
+
+fn setup_free_cam(
+    mut commands: Commands,
+    player_transform: Single<&GlobalTransform, With<Player>>,
+) {
+    // Spawn a second window
+    let second_window = commands
+        .spawn(Window {
+            title: "Second window".to_owned(),
+            ..default()
+        })
+        .id();
+
+    commands.spawn((
+            Camera3d::default(),
+            Camera {
+                hdr: true, // 1. HDR is required for bloom
+                target: RenderTarget::Window(WindowRef::Entity(second_window)),
+                ..default()
+            },
+            Projection::Perspective(PerspectiveProjection {
+                fov: 36_f32.to_radians(),
+                aspect_ratio: 16. / 9.,
+                near: 0.001,
+                far: 1000.,
+            }),
+            Atmosphere::EARTH,
+            Exposure::SUNLIGHT,
+            Tonemapping::AcesFitted,
+            Transform::from_xyz(-10.0, 10.0, 10.0).looking_at(player_transform.translation(), Vec3::Y),
+            Bloom::NATURAL,
+            FreeCamera,
+            ));
+}
+
+fn select_camera(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::KeyV) {
+        // toggle active camera
+    }
+}
 
 fn setup_player(
     mut commands: Commands,
