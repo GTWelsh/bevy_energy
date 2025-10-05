@@ -1,8 +1,8 @@
 use avian3d::prelude::*;
 use bevy::{
-    pbr::CascadeShadowConfigBuilder,
+    light::CascadeShadowConfigBuilder,
     prelude::{light_consts::lux, *},
-    window::{CursorGrabMode, PrimaryWindow},
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 use std::f32::consts::PI;
 
@@ -50,20 +50,16 @@ fn setup_atmos(mut commands: Commands) {
 }
 
 fn hide_cursor(
-    mut q_windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut cursor: Single<&mut CursorOptions>,
     mut lock_cursor: Local<bool>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    let Ok(mut window) = q_windows.single_mut() else {
-        return;
-    };
-
     if *lock_cursor {
-        window.cursor_options.grab_mode = CursorGrabMode::Confined;
-        window.cursor_options.visible = false;
+        cursor.grab_mode = CursorGrabMode::Confined;
+        cursor.visible = false;
     } else {
-        window.cursor_options.grab_mode = CursorGrabMode::None;
-        window.cursor_options.visible = true;
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
     }
 
     if keyboard_input.just_pressed(KeyCode::F1) {

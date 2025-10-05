@@ -6,13 +6,12 @@ use avian3d::math::Scalar;
 use avian3d::prelude::{
     CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
+use bevy::camera::{Exposure, RenderTarget};
 use bevy::pbr::Atmosphere;
-use bevy::render::camera::{Exposure, RenderTarget};
+use bevy::post_process::bloom::Bloom;
 use bevy::window::WindowRef;
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    input::mouse::AccumulatedMouseMotion,
-    prelude::*,
+    core_pipeline::tonemapping::Tonemapping, input::mouse::AccumulatedMouseMotion, prelude::*,
 };
 use bevy_dev_tools::fps_overlay::FpsOverlayPlugin;
 
@@ -32,7 +31,7 @@ fn main() {
                 (lean_camera, rotate_horizontal, look_vertical).chain(),
                 player_shoot,
                 aim,
-               select_camera, 
+                select_camera,
             ),
         )
         .run();
@@ -96,7 +95,11 @@ fn lean_camera(
     mut transform: Single<&mut Transform, With<PlayerCamera>>,
     mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
 ) {
-    let rotation_point = Vec3::new(transform.translation.x, transform.translation.y - 2.0, transform.translation.z);
+    let rotation_point = Vec3::new(
+        transform.translation.x,
+        transform.translation.y - 2.0,
+        transform.translation.z,
+    );
     let max_lean = 30_f32;
     let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
     let leaning_right = player_lean.0 > 0_f32;
@@ -214,30 +217,27 @@ fn setup_free_cam(
         .id();
 
     commands.spawn((
-            Camera3d::default(),
-            Camera {
-                hdr: true, // 1. HDR is required for bloom
-                target: RenderTarget::Window(WindowRef::Entity(second_window)),
-                ..default()
-            },
-            Projection::Perspective(PerspectiveProjection {
-                fov: 36_f32.to_radians(),
-                aspect_ratio: 16. / 9.,
-                near: 0.001,
-                far: 1000.,
-            }),
-            Atmosphere::EARTH,
-            Exposure::SUNLIGHT,
-            Tonemapping::AcesFitted,
-            Transform::from_xyz(-10.0, 10.0, 10.0).looking_at(player_transform.translation(), Vec3::Y),
-            Bloom::NATURAL,
-            FreeCamera,
-            ));
+        Camera3d::default(),
+        Camera {
+            target: RenderTarget::Window(WindowRef::Entity(second_window)),
+            ..default()
+        },
+        Projection::Perspective(PerspectiveProjection {
+            fov: 36_f32.to_radians(),
+            aspect_ratio: 16. / 9.,
+            near: 0.001,
+            far: 1000.,
+        }),
+        Atmosphere::EARTH,
+        Exposure::SUNLIGHT,
+        Tonemapping::AcesFitted,
+        Transform::from_xyz(-10.0, 10.0, 10.0).looking_at(player_transform.translation(), Vec3::Y),
+        Bloom::NATURAL,
+        FreeCamera,
+    ));
 }
 
-fn select_camera(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-) {
+fn select_camera(keyboard_input: Res<ButtonInput<KeyCode>>) {
     if keyboard_input.just_pressed(KeyCode::KeyV) {
         // toggle active camera
     }
@@ -276,10 +276,7 @@ fn setup_player(
                         near: 0.001,
                         far: 1000.,
                     }),
-                    Camera {
-                        hdr: true, // 1. HDR is required for bloom
-                        ..default()
-                    },
+                    Camera { ..default() },
                     Atmosphere::EARTH,
                     Exposure::SUNLIGHT,
                     Tonemapping::AcesFitted,
