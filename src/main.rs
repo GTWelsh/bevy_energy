@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 mod movement;
 mod scene;
 
@@ -6,10 +8,9 @@ use avian3d::math::Scalar;
 use avian3d::prelude::{
     CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
 };
-use bevy::camera::{Exposure, RenderTarget};
+use bevy::camera::Exposure;
 use bevy::pbr::Atmosphere;
 use bevy::post_process::bloom::Bloom;
-use bevy::window::WindowRef;
 use bevy::{
     core_pipeline::tonemapping::Tonemapping, input::mouse::AccumulatedMouseMotion, prelude::*,
 };
@@ -24,14 +25,13 @@ fn main() {
             scene::ScenePlugin,
             movement::CharacterControllerPlugin,
         ))
-        .add_systems(Startup, (setup_player, setup_free_cam).chain())
+        .add_systems(Startup, setup_player)
         .add_systems(
             Update,
             (
                 (lean_camera, rotate_horizontal, look_vertical).chain(),
                 player_shoot,
                 aim,
-                select_camera,
             ),
         )
         .run();
@@ -74,18 +74,40 @@ fn player_shoot(
 fn aim(
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut weapon_query: Query<
-        (&mut Transform, &DefaultTransform, &SightOffsetTransform),
+        (
+            &mut Transform,
+            &DefaultTransform,
+            &SightOffsetTransform,
+            &mut AdsAlpha,
+        ),
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut trans, def_trans, sight_trans) in &mut weapon_query {
-        let target = if mouse_input.pressed(MouseButton::Right) {
-            sight_trans.0
+    for (mut trans, def_trans, sight_trans, mut ads_alpha) in &mut weapon_query {
+        const AIM_SPEED: f32 = 0.03;
+
+        let step = if mouse_input.pressed(MouseButton::Right) {
+            1.0
         } else {
-            def_trans.0
+            -1.0
+        } * AIM_SPEED;
+
+        let ease = if step > 0.0 {
+            EaseFunction::ExponentialOut
+        } else {
+            EaseFunction::CircularInOut
         };
 
-        trans.translation = trans.translation.lerp(target, 0.2);
+        let new_ads_alpha = ads_alpha.0 + step;
+        ads_alpha.0 = new_ads_alpha.clamp(0.0, 1.0);
+
+        let curve_alpha = EasingCurve::new(0.0, 1.0, ease)
+            .sample(ads_alpha.0)
+            .unwrap_or(0.0);
+
+        let diff = sight_trans.0 - def_trans.0;
+
+        trans.translation = def_trans.0 + (diff * curve_alpha);
     }
 }
 
@@ -193,6 +215,9 @@ fn rotate_horizontal(
 }
 
 #[derive(Component)]
+struct AdsAlpha(f32);
+
+#[derive(Component)]
 struct SightOffsetTransform(Vec3);
 
 #[derive(Component)]
@@ -200,48 +225,6 @@ struct DefaultTransform(Vec3);
 
 #[derive(Component)]
 struct WeaponActive;
-
-#[derive(Component)]
-struct FreeCamera;
-
-fn setup_free_cam(
-    mut commands: Commands,
-    player_transform: Single<&GlobalTransform, With<Player>>,
-) {
-    // Spawn a second window
-    let second_window = commands
-        .spawn(Window {
-            title: "Second window".to_owned(),
-            ..default()
-        })
-        .id();
-
-    commands.spawn((
-        Camera3d::default(),
-        Camera {
-            target: RenderTarget::Window(WindowRef::Entity(second_window)),
-            ..default()
-        },
-        Projection::Perspective(PerspectiveProjection {
-            fov: 36_f32.to_radians(),
-            aspect_ratio: 16. / 9.,
-            near: 0.001,
-            far: 1000.,
-        }),
-        Atmosphere::EARTH,
-        Exposure::SUNLIGHT,
-        Tonemapping::AcesFitted,
-        Transform::from_xyz(-10.0, 10.0, 10.0).looking_at(player_transform.translation(), Vec3::Y),
-        Bloom::NATURAL,
-        FreeCamera,
-    ));
-}
-
-fn select_camera(keyboard_input: Res<ButtonInput<KeyCode>>) {
-    if keyboard_input.just_pressed(KeyCode::KeyV) {
-        // toggle active camera
-    }
-}
 
 fn setup_player(
     mut commands: Commands,
@@ -285,6 +268,8 @@ fn setup_player(
                     PlayerCamera,
                 ))
                 .with_children(|parent_camera| {
+                    let hip_pos = Vec3::new(0.1, -0.1, -0.5);
+                    let ads_pos = Vec3::new(0.0, -0.07, -0.3);
                     parent_camera.spawn((
                         SceneRoot(
                             asset_server
@@ -293,8 +278,9 @@ fn setup_player(
                         Transform::from_xyz(0.1, -0.1, -0.5).looking_to(Vec3::NEG_Z, Vec3::Y),
                         PlayerWeapon,
                         WeaponActive,
-                        DefaultTransform(Vec3::new(0.1, -0.1, -0.5)),
-                        SightOffsetTransform(Vec3::new(0.0, -0.07, -0.3)),
+                        DefaultTransform(hip_pos),
+                        SightOffsetTransform(ads_pos),
+                        AdsAlpha(0.0),
                     ));
                 });
 

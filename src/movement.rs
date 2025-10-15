@@ -153,7 +153,7 @@ impl CharacterControllerBundle {
 
 /// Sends [`MovementAction`] events based on keyboard input.
 fn keyboard_input(
-    mut movement_event_writer: EventWriter<MovementAction>,
+    mut movement_event_writer: MessageWriter<MovementAction>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     let up = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
@@ -176,7 +176,7 @@ fn keyboard_input(
 
 /// Sends [`MovementAction`] events based on gamepad input.
 fn gamepad_input(
-    mut movement_event_writer: EventWriter<MovementAction>,
+    mut movement_event_writer: MessageWriter<MovementAction>,
     gamepads: Query<&Gamepad>,
 ) {
     for gamepad in gamepads.iter() {
@@ -249,7 +249,7 @@ type MovementQuery<'a> = (
 /// Responds to [`MovementAction`] events and moves character controllers accordingly.
 fn movement(
     time: Res<Time>,
-    mut movement_event_reader: EventReader<MovementAction>,
+    mut movement_event_reader: MessageReader<MovementAction>,
     mut controllers: Query<MovementQuery>,
 ) {
     // Precision is adjusted so that the example works with
