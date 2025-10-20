@@ -29,7 +29,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                (lean_camera, rotate_horizontal, look_vertical).chain(),
+                (rotate_horizontal, look_vertical).chain(),
                 player_shoot,
                 aim,
             ),
@@ -45,9 +45,6 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
-
-#[derive(Component)]
-struct Lean(f32);
 
 fn player_shoot(
     mut commands: Commands,
@@ -83,19 +80,21 @@ fn aim(
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut trans, def_trans, sight_trans, mut ads_alpha) in &mut weapon_query {
-        const AIM_SPEED: f32 = 0.03;
+    for (mut trans, default_transform, aim_transform, mut ads_alpha) in &mut weapon_query {
+        // these values could come from some kind of config and or multipliers
+        const AIM_TIME: f32 = 0.05;
+        const UN_AIM_TIME: f32 = 0.05;
 
         let step = if mouse_input.pressed(MouseButton::Right) {
-            1.0
+            AIM_TIME
         } else {
-            -1.0
-        } * AIM_SPEED;
+            -UN_AIM_TIME
+        };
 
         let ease = if step > 0.0 {
-            EaseFunction::ExponentialOut
+            EaseFunction::QuarticOut
         } else {
-            EaseFunction::CircularInOut
+            EaseFunction::QuinticInOut
         };
 
         let new_ads_alpha = ads_alpha.0 + step;
@@ -105,79 +104,10 @@ fn aim(
             .sample(ads_alpha.0)
             .unwrap_or(0.0);
 
-        let diff = sight_trans.0 - def_trans.0;
+        let aim_difference = aim_transform.0 - default_transform.0;
 
-        trans.translation = def_trans.0 + (diff * curve_alpha);
+        trans.translation = default_transform.0 + (aim_difference * curve_alpha);
     }
-}
-
-fn lean_camera(
-    time: Res<Time>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut transform: Single<&mut Transform, With<PlayerCamera>>,
-    mut player_lean: Single<&mut Lean, (With<Player>, Without<PlayerCamera>)>,
-) {
-    let rotation_point = Vec3::new(
-        transform.translation.x,
-        transform.translation.y - 2.0,
-        transform.translation.z,
-    );
-    let max_lean = 30_f32;
-    let curr_angle = transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees();
-    let leaning_right = player_lean.0 > 0_f32;
-    let leaning_left = player_lean.0 < 0_f32;
-    let trying_to_lean_left = keyboard_input.pressed(KeyCode::KeyQ);
-    let trying_to_lean_right = keyboard_input.pressed(KeyCode::KeyE);
-    let player_lean_speed = 4_f32 * time.delta_secs();
-    let will_lean_left = trying_to_lean_left && !leaning_right;
-    let will_lean_right = trying_to_lean_right && !leaning_left;
-    let will_lean = will_lean_left || will_lean_right;
-
-    let mut working_lean = player_lean.0;
-
-    // lean
-    if will_lean_left {
-        working_lean -= player_lean_speed;
-    } else if will_lean_right {
-        working_lean += player_lean_speed;
-    } else {
-        // auto return to center
-        if leaning_right {
-            working_lean -= player_lean_speed;
-        } else if leaning_left {
-            working_lean += player_lean_speed;
-        }
-    }
-
-    working_lean = working_lean.clamp(-1_f32, 1_f32);
-
-    let easing = if will_lean {
-        EaseFunction::SineOut
-    } else {
-        EaseFunction::SineIn
-    };
-
-    let translation_curve = EasingCurve::new(0_f32, max_lean, easing);
-
-    let alpha = if leaning_left || will_lean_left {
-        -working_lean
-    } else {
-        working_lean
-    };
-
-    let mut curved_lean = translation_curve.sample(alpha).unwrap_or(0_f32);
-
-    if leaning_right {
-        curved_lean = -curved_lean;
-    }
-
-    let rotation_step = (curr_angle - curved_lean).to_radians();
-
-    let rotation = Quat::from_axis_angle(Vec3::NEG_Z, rotation_step);
-
-    transform.rotate_around(rotation_point, rotation);
-
-    player_lean.0 = working_lean;
 }
 
 fn look_vertical(
@@ -242,7 +172,6 @@ fn setup_player(
             MeshMaterial3d(materials.add(Color::WHITE)),
             Player,
             transform,
-            Lean(0_f32),
             movement::CharacterControllerBundle::new(Collider::capsule(radius, height))
                 .with_movement(25.0, 2., 0.85, 7.0, (30.0 as Scalar).to_radians()),
             Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
