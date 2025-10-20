@@ -15,6 +15,7 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping, input::mouse::AccumulatedMouseMotion, prelude::*,
 };
 use bevy_dev_tools::fps_overlay::FpsOverlayPlugin;
+use rand::Rng;
 
 fn main() {
     App::new()
@@ -28,11 +29,11 @@ fn main() {
         .add_systems(Startup, setup_player)
         .add_systems(
             Update,
-            (
-                (rotate_horizontal, look_vertical).chain(),
-                player_shoot,
-                aim,
-            ),
+            ((rotate_horizontal, look_vertical).chain(), player_shoot),
+        )
+        .add_systems(
+            FixedUpdate,
+            ((aim, weapon_sway, set_weapon_transform).chain(),),
         )
         .run();
 }
@@ -45,6 +46,51 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
+
+fn weapon_sway(
+    time: Res<Time>,
+    mut alpha: Local<f32>,
+    mut sway_right: Local<bool>,
+    mut sway_to: Local<Vec3>,
+    mut weapon_query: Query<&mut CurrentTranslation, (With<PlayerWeapon>, With<WeaponActive>)>,
+) {
+    let speed = 0.0075; // easy thing to modify based on player state
+    let max_sway = 0.05; // easy thing to modify based on player state
+    let mut change_sway = false;
+
+    if *alpha >= 1.0 {
+        *sway_right = false;
+    } else if *alpha <= 0.0 {
+        *sway_right = true;
+        change_sway = true; // signal we are restarting the sway animation, change it up a bit
+    }
+
+    let mut rng = rand::rng();
+
+    // make a random sway target vector to go towards
+    if change_sway {
+        *sway_to = Vec3::new(
+            rng.random_range(-max_sway..=max_sway),
+            rng.random_range(-max_sway..=max_sway),
+            rng.random_range(-max_sway..=max_sway),
+        );
+    }
+
+    if !*sway_right {
+        *alpha -= speed;
+    } else {
+        *alpha += speed;
+    }
+
+    *alpha = alpha.clamp(0.0, 1.0);
+
+    let curve = EaseFunction::SmoothStep;
+    let curve_alpha = EasingCurve::new(0.0, 1.0, curve).sample(*alpha).unwrap();
+
+    for mut current_translation in &mut weapon_query {
+        current_translation.0 += *sway_to * curve_alpha * time.delta_secs();
+    }
+}
 
 fn player_shoot(
     mut commands: Commands,
@@ -68,11 +114,23 @@ fn player_shoot(
     ));
 }
 
+fn set_weapon_transform(
+    mut weapon_query: Query<
+        (&mut Transform, &CurrentTranslation),
+        (With<PlayerWeapon>, With<WeaponActive>),
+    >,
+) {
+    for (mut trans, current_translation) in &mut weapon_query {
+        trans.translation = current_translation.0;
+    }
+}
+
 fn aim(
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut weapon_query: Query<
         (
             &mut Transform,
+            &mut CurrentTranslation,
             &DefaultTransform,
             &SightOffsetTransform,
             &mut AdsAlpha,
@@ -80,7 +138,9 @@ fn aim(
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut trans, default_transform, aim_transform, mut ads_alpha) in &mut weapon_query {
+    for (mut trans, mut current_transform, default_transform, aim_transform, mut ads_alpha) in
+        &mut weapon_query
+    {
         // these values could come from some kind of config and or multipliers
         const AIM_TIME: f32 = 0.05;
         const UN_AIM_TIME: f32 = 0.05;
@@ -106,7 +166,7 @@ fn aim(
 
         let aim_difference = aim_transform.0 - default_transform.0;
 
-        trans.translation = default_transform.0 + (aim_difference * curve_alpha);
+        current_transform.0 = default_transform.0 + (aim_difference * curve_alpha);
     }
 }
 
@@ -154,6 +214,9 @@ struct SightOffsetTransform(Vec3);
 struct DefaultTransform(Vec3);
 
 #[derive(Component)]
+struct CurrentTranslation(Vec3);
+
+#[derive(Component)]
 struct WeaponActive;
 
 fn setup_player(
@@ -199,14 +262,21 @@ fn setup_player(
                 .with_children(|parent_camera| {
                     let hip_pos = Vec3::new(0.1, -0.1, -0.5);
                     let ads_pos = Vec3::new(0.0, -0.07, -0.3);
+                    let current_transform = Vec3::new(0.1, -0.1, -0.5);
                     parent_camera.spawn((
                         SceneRoot(
                             asset_server
                                 .load(GltfAssetLabel::Scene(0).from_asset("weapons/mpx/main.glb")),
                         ),
-                        Transform::from_xyz(0.1, -0.1, -0.5).looking_to(Vec3::NEG_Z, Vec3::Y),
+                        Transform::from_xyz(
+                            current_transform.x,
+                            current_transform.y,
+                            current_transform.z,
+                        )
+                        .looking_to(Vec3::NEG_Z, Vec3::Y),
                         PlayerWeapon,
                         WeaponActive,
+                        CurrentTranslation(current_transform),
                         DefaultTransform(hip_pos),
                         SightOffsetTransform(ads_pos),
                         AdsAlpha(0.0),
