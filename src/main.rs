@@ -17,6 +17,13 @@ use bevy::{
 use bevy_dev_tools::fps_overlay::FpsOverlayPlugin;
 use rand::Rng;
 
+/*
+ * IDEAS
+ * - Walking alpha
+ * - Breathing alpha
+ *
+ * */
+
 fn main() {
     App::new()
         .add_plugins((
@@ -33,7 +40,7 @@ fn main() {
         )
         .add_systems(
             FixedUpdate,
-            ((aim, weapon_sway, set_weapon_transform).chain(),),
+            ((aim, breathing, weapon_sway, set_weapon_transform).chain(),),
         )
         .run();
 }
@@ -42,53 +49,103 @@ fn main() {
 struct Player;
 
 #[derive(Component)]
+enum WalkingStride {
+    Left(f32),
+    Right(f32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum BreathDirection {
+    In = 0,
+    Out = 1,
+}
+
+#[derive(Component)]
+struct BreathIntake {
+    alpha: f32,
+    direction: BreathDirection,
+}
+
+#[derive(Component)]
 struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
 
+// sway direction enum and a sway Vec3
+
+struct WeaponSway {
+    base: Vec3,
+    new: Vec3,
+}
+
+fn breathing(time: Res<Time>, players_q: Query<&mut BreathIntake, With<Player>>) {
+    let speed = 0.75 * time.delta_secs(); // easy thing to modify based on player state
+
+    for mut breath in players_q {
+        breath.alpha += speed;
+
+        if breath.alpha >= 1.0 {
+            breath.alpha = 0.0;
+            breath.direction = if breath.direction == BreathDirection::In {
+                BreathDirection::Out
+            } else {
+                BreathDirection::In
+            };
+        }
+    }
+}
+
 fn weapon_sway(
-    time: Res<Time>,
-    mut alpha: Local<f32>,
-    mut sway_right: Local<bool>,
-    mut sway_to: Local<Vec3>,
+    players_q: Query<(&BreathIntake, &Children), With<Player>>,
+    camera_q: Query<(&PlayerCamera, &Children)>,
+    mut sway_base: Local<Vec3>, //TODO: make this local to the player, not the system
+    mut sway_new: Local<Vec3>,  //TODO: make this local to the player, not the system
     mut weapon_query: Query<&mut CurrentTranslation, (With<PlayerWeapon>, With<WeaponActive>)>,
 ) {
-    let speed = 0.0075; // easy thing to modify based on player state
-    let max_sway = 0.05; // easy thing to modify based on player state
-    let mut change_sway = false;
+    let max_sway = 0.0005; // easy thing to modify based on player state
 
-    if *alpha >= 1.0 {
-        *sway_right = false;
-    } else if *alpha <= 0.0 {
-        *sway_right = true;
-        change_sway = true; // signal we are restarting the sway animation, change it up a bit
-    }
+    for (breath, children) in players_q {
+        let breath_alpha = breath.alpha;
 
-    let mut rng = rand::rng();
+        if breath_alpha >= 1.0 || breath_alpha == 0.0 {
+            *sway_base = *sway_new;
+        }
 
-    // make a random sway target vector to go towards
-    if change_sway {
-        *sway_to = Vec3::new(
-            rng.random_range(-max_sway..=max_sway),
-            rng.random_range(-max_sway..=max_sway),
-            rng.random_range(-max_sway..=max_sway),
-        );
-    }
+        let change_sway = *sway_base == *sway_new;
+        let mut rng = rand::rng();
 
-    if !*sway_right {
-        *alpha -= speed;
-    } else {
-        *alpha += speed;
-    }
+        if change_sway {
+            *sway_new = Vec3::new(
+                rng.random_range(-max_sway..=max_sway),
+                rng.random_range(-max_sway..=max_sway),
+                rng.random_range(-max_sway..=max_sway),
+            );
+        }
 
-    *alpha = alpha.clamp(0.0, 1.0);
+        let curve = EaseFunction::SmoothStep;
+        let curve_alpha = EasingCurve::new(0.0, 1.0, curve)
+            .sample(breath.alpha)
+            .unwrap();
 
-    let curve = EaseFunction::SmoothStep;
-    let curve_alpha = EasingCurve::new(0.0, 1.0, curve).sample(*alpha).unwrap();
+        // query the children -> player (here) -> camera -> weapon
+        for &camera_entity in children {
+            let camera = camera_q.get(camera_entity);
 
-    for mut current_translation in &mut weapon_query {
-        current_translation.0 += *sway_to * curve_alpha * time.delta_secs();
+            if camera.is_err() {
+                continue;
+            }
+
+            for &child in camera.unwrap().1 {
+                if let Ok(mut current_translation) = weapon_query.get_mut(child) {
+                    let new_base_sway_vec = current_translation.0 + *sway_base;
+                    let new_target_sway_vec = current_translation.0 + *sway_new;
+                    let sway_diff = new_target_sway_vec - new_base_sway_vec;
+
+                    current_translation.0 += *sway_base + (sway_diff * curve_alpha);
+                }
+            }
+        }
     }
 }
 
@@ -129,7 +186,6 @@ fn aim(
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut weapon_query: Query<
         (
-            &mut Transform,
             &mut CurrentTranslation,
             &DefaultTransform,
             &SightOffsetTransform,
@@ -138,7 +194,7 @@ fn aim(
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut trans, mut current_transform, default_transform, aim_transform, mut ads_alpha) in
+    for (mut current_transform, default_transform, aim_transform, mut ads_alpha) in
         &mut weapon_query
     {
         // these values could come from some kind of config and or multipliers
@@ -240,6 +296,11 @@ fn setup_player(
             Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
             Restitution::ZERO.with_combine_rule(CoefficientCombine::Min),
             GravityScale(2.0),
+            WalkingStride::Right(0.0),
+            BreathIntake {
+                alpha: 0.0,
+                direction: BreathDirection::Out,
+            },
         ))
         .with_children(|parent| {
             parent
