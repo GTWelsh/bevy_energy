@@ -101,7 +101,7 @@ fn weapon_sway(
     camera_q: Query<(&PlayerCamera, &Children)>,
     mut sway_base: Local<Vec3>, //TODO: make this local to the player, not the system
     mut sway_new: Local<Vec3>,  //TODO: make this local to the player, not the system
-    mut weapon_query: Query<&mut CurrentTranslation, (With<PlayerWeapon>, With<WeaponActive>)>,
+    mut weapon_query: Query<&mut TranslationPipeline, (With<PlayerWeapon>, With<WeaponActive>)>,
 ) {
     let max_sway = 0.0005; // easy thing to modify based on player state
 
@@ -137,12 +137,14 @@ fn weapon_sway(
             }
 
             for &child in camera.unwrap().1 {
-                if let Ok(mut current_translation) = weapon_query.get_mut(child) {
-                    let new_base_sway_vec = current_translation.0 + *sway_base;
-                    let new_target_sway_vec = current_translation.0 + *sway_new;
+                if let Ok(mut position_pipe) = weapon_query.get_mut(child) {
+                    let position = position_pipe.latest();
+                    let new_base_sway_vec = position + *sway_base;
+                    let new_target_sway_vec = position + *sway_new;
                     let sway_diff = new_target_sway_vec - new_base_sway_vec;
+                    let new_position = *sway_base + (sway_diff * curve_alpha);
 
-                    current_translation.0 += *sway_base + (sway_diff * curve_alpha);
+                    position_pipe.queue(new_position);
                 }
             }
         }
@@ -173,12 +175,12 @@ fn player_shoot(
 
 fn set_weapon_transform(
     mut weapon_query: Query<
-        (&mut Transform, &CurrentTranslation),
+        (&mut Transform, &mut TranslationPipeline),
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut trans, current_translation) in &mut weapon_query {
-        trans.translation = current_translation.0;
+    for (mut trans, mut current_translation) in &mut weapon_query {
+        trans.translation = current_translation.apply();
     }
 }
 
@@ -186,7 +188,7 @@ fn aim(
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut weapon_query: Query<
         (
-            &mut CurrentTranslation,
+            &mut TranslationPipeline,
             &DefaultTransform,
             &SightOffsetTransform,
             &mut AdsAlpha,
@@ -222,7 +224,7 @@ fn aim(
 
         let aim_difference = aim_transform.0 - default_transform.0;
 
-        current_transform.0 = default_transform.0 + (aim_difference * curve_alpha);
+        current_transform.queue(aim_difference * curve_alpha);
     }
 }
 
@@ -270,7 +272,44 @@ struct SightOffsetTransform(Vec3);
 struct DefaultTransform(Vec3);
 
 #[derive(Component)]
-struct CurrentTranslation(Vec3);
+struct TranslationPipeline {
+    base_translation: Vec3,
+    additive_translations: Vec<Vec3>,
+}
+
+impl TranslationPipeline {
+    fn new(translation: Vec3) -> Self {
+        Self {
+            base_translation: translation,
+            additive_translations: vec![],
+        }
+    }
+
+    fn queue(&mut self, translation: Vec3) -> &Self {
+        self.additive_translations.push(translation);
+        self
+    }
+
+    fn latest(&mut self) -> Vec3 {
+        let mut output = self.base_translation;
+
+        for t in self.additive_translations.iter() {
+            output += t;
+        }
+
+        output
+    }
+
+    fn apply(&mut self) -> Vec3 {
+        let mut output = self.base_translation;
+
+        while let Some(t) = self.additive_translations.pop() {
+            output += t;
+        }
+
+        output
+    }
+}
 
 #[derive(Component)]
 struct WeaponActive;
@@ -321,25 +360,20 @@ fn setup_player(
                     PlayerCamera,
                 ))
                 .with_children(|parent_camera| {
-                    let hip_pos = Vec3::new(0.1, -0.1, -0.5);
-                    let ads_pos = Vec3::new(0.0, -0.07, -0.3);
-                    let current_transform = Vec3::new(0.1, -0.1, -0.5);
+                    let ads_position = Vec3::new(0.0, -0.07, -0.3);
+                    let hip_position = Vec3::new(0.1, -0.1, -0.5);
                     parent_camera.spawn((
                         SceneRoot(
                             asset_server
                                 .load(GltfAssetLabel::Scene(0).from_asset("weapons/mpx/main.glb")),
                         ),
-                        Transform::from_xyz(
-                            current_transform.x,
-                            current_transform.y,
-                            current_transform.z,
-                        )
-                        .looking_to(Vec3::NEG_Z, Vec3::Y),
+                        Transform::from_xyz(hip_position.x, hip_position.y, hip_position.z)
+                            .looking_to(Vec3::NEG_Z, Vec3::Y),
                         PlayerWeapon,
                         WeaponActive,
-                        CurrentTranslation(current_transform),
-                        DefaultTransform(hip_pos),
-                        SightOffsetTransform(ads_pos),
+                        TranslationPipeline::new(hip_position),
+                        DefaultTransform(hip_position),
+                        SightOffsetTransform(ads_position),
                         AdsAlpha(0.0),
                     ));
                 });
