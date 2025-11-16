@@ -48,12 +48,6 @@ fn main() {
 #[derive(Component)]
 struct Player;
 
-#[derive(Component)]
-enum WalkingStride {
-    Left(f32),
-    Right(f32),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum BreathDirection {
     In = 0,
@@ -71,13 +65,6 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
-
-// sway direction enum and a sway Vec3
-
-struct WeaponSway {
-    base: Vec3,
-    new: Vec3,
-}
 
 fn breathing(time: Res<Time>, players_q: Query<&mut BreathIntake, With<Player>>) {
     let speed = 0.75 * time.delta_secs(); // easy thing to modify based on player state
@@ -189,16 +176,13 @@ fn aim(
     mut weapon_query: Query<
         (
             &mut TranslationPipeline,
-            &DefaultTransform,
-            &SightOffsetTransform,
+            &PlayerWeaponTransformConfig,
             &mut AdsAlpha,
         ),
         (With<PlayerWeapon>, With<WeaponActive>),
     >,
 ) {
-    for (mut current_transform, default_transform, aim_transform, mut ads_alpha) in
-        &mut weapon_query
-    {
+    for (mut current_transform, transform_config, mut ads_alpha) in &mut weapon_query {
         // these values could come from some kind of config and or multipliers
         const AIM_TIME: f32 = 0.05;
         const UN_AIM_TIME: f32 = 0.05;
@@ -222,9 +206,7 @@ fn aim(
             .sample(ads_alpha.0)
             .unwrap_or(0.0);
 
-        let aim_difference = aim_transform.0 - default_transform.0;
-
-        current_transform.queue(aim_difference * curve_alpha);
+        current_transform.queue(transform_config.aim_difference() * curve_alpha);
     }
 }
 
@@ -266,10 +248,20 @@ fn rotate_horizontal(
 struct AdsAlpha(f32);
 
 #[derive(Component)]
-struct SightOffsetTransform(Vec3);
+struct PlayerWeaponTransformConfig {
+    hip: Vec3,
+    aim: Vec3,
+}
 
-#[derive(Component)]
-struct DefaultTransform(Vec3);
+impl PlayerWeaponTransformConfig {
+    fn new(hip: Vec3, aim: Vec3) -> Self {
+        Self { hip, aim }
+    }
+
+    fn aim_difference(&self) -> Vec3 {
+        self.aim - self.hip
+    }
+}
 
 #[derive(Component)]
 struct TranslationPipeline {
@@ -335,7 +327,6 @@ fn setup_player(
             Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
             Restitution::ZERO.with_combine_rule(CoefficientCombine::Min),
             GravityScale(2.0),
-            WalkingStride::Right(0.0),
             BreathIntake {
                 alpha: 0.0,
                 direction: BreathDirection::Out,
@@ -360,8 +351,11 @@ fn setup_player(
                     PlayerCamera,
                 ))
                 .with_children(|parent_camera| {
-                    let ads_position = Vec3::new(0.0, -0.07, -0.3);
+                    let aim_position = Vec3::new(0.0, -0.07, -0.3);
                     let hip_position = Vec3::new(0.1, -0.1, -0.5);
+                    let transform_config =
+                        PlayerWeaponTransformConfig::new(hip_position, aim_position);
+
                     parent_camera.spawn((
                         SceneRoot(
                             asset_server
@@ -372,8 +366,7 @@ fn setup_player(
                         PlayerWeapon,
                         WeaponActive,
                         TranslationPipeline::new(hip_position),
-                        DefaultTransform(hip_position),
-                        SightOffsetTransform(ads_position),
+                        transform_config,
                         AdsAlpha(0.0),
                     ));
                 });
