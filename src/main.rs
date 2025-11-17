@@ -83,31 +83,65 @@ fn breathing(time: Res<Time>, players_q: Query<&mut BreathIntake, With<Player>>)
     }
 }
 
+#[derive(Component, Default)]
+struct WeaponSway {
+    max_sway: f32,
+    base: Vec3,
+    next: Vec3,
+}
+
+impl WeaponSway {
+    fn new(max_sway: f32) -> Self {
+        Self {
+            max_sway,
+            ..default()
+        }
+    }
+
+    fn renew(&mut self) {
+        self.base = self.next;
+    }
+
+    fn change(&mut self) {
+        let mut rng = rand::rng();
+        self.next = Vec3::new(
+            rng.random_range(-self.max_sway..=self.max_sway),
+            rng.random_range(-self.max_sway..=self.max_sway),
+            rng.random_range(-self.max_sway..=self.max_sway),
+        );
+    }
+
+    fn is_complete(&self) -> bool {
+        self.base == self.next
+    }
+
+    fn diff_from(&self, origin: Vec3) -> Vec3 {
+        let new_base_sway_vec = origin + self.base;
+        let new_target_sway_vec = origin + self.next;
+        new_target_sway_vec - new_base_sway_vec
+    }
+
+    fn lerp_from(&self, origin: Vec3, alpha: f32) -> Vec3 {
+        self.base + self.diff_from(origin) * alpha
+    }
+}
+
 fn weapon_sway(
-    players_q: Query<(&BreathIntake, &Children), With<Player>>,
+    players_q: Query<(&BreathIntake, &mut WeaponSway, &Children), With<Player>>,
     camera_q: Query<(&PlayerCamera, &Children)>,
-    mut sway_base: Local<Vec3>, //TODO: make this local to the player, not the system
-    mut sway_new: Local<Vec3>,  //TODO: make this local to the player, not the system
     mut weapon_query: Query<&mut TranslationPipeline, (With<PlayerWeapon>, With<WeaponActive>)>,
 ) {
-    let max_sway = 0.0005; // easy thing to modify based on player state
-
-    for (breath, children) in players_q {
+    for (breath, mut weapon_sway, children) in players_q {
         let breath_alpha = breath.alpha;
 
         if breath_alpha >= 1.0 || breath_alpha == 0.0 {
-            *sway_base = *sway_new;
+            weapon_sway.renew();
         }
 
-        let change_sway = *sway_base == *sway_new;
-        let mut rng = rand::rng();
+        let change_sway = weapon_sway.is_complete();
 
         if change_sway {
-            *sway_new = Vec3::new(
-                rng.random_range(-max_sway..=max_sway),
-                rng.random_range(-max_sway..=max_sway),
-                rng.random_range(-max_sway..=max_sway),
-            );
+            weapon_sway.change();
         }
 
         let curve = EaseFunction::SmoothStep;
@@ -126,12 +160,7 @@ fn weapon_sway(
             for &child in camera.unwrap().1 {
                 if let Ok(mut position_pipe) = weapon_query.get_mut(child) {
                     let position = position_pipe.latest();
-                    let new_base_sway_vec = position + *sway_base;
-                    let new_target_sway_vec = position + *sway_new;
-                    let sway_diff = new_target_sway_vec - new_base_sway_vec;
-                    let new_position = *sway_base + (sway_diff * curve_alpha);
-
-                    position_pipe.queue(new_position);
+                    position_pipe.queue(weapon_sway.lerp_from(position, curve_alpha));
                 }
             }
         }
@@ -331,6 +360,7 @@ fn setup_player(
                 alpha: 0.0,
                 direction: BreathDirection::Out,
             },
+            WeaponSway::new(0.0005),
         ))
         .with_children(|parent| {
             parent
