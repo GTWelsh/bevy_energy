@@ -115,12 +115,17 @@ impl WeaponSway {
         self.base == self.next
     }
 
+    /// Return the vector from base to next relative to the origin
+    ///
+    /// This gives us a way of swaying from one sway location to another without having to revisit
+    /// the centre
     fn diff_from(&self, origin: Vec3) -> Vec3 {
-        let new_base_sway_vec = origin + self.base;
-        let new_target_sway_vec = origin + self.next;
-        new_target_sway_vec - new_base_sway_vec
+        let base_from_origin = origin + self.base;
+        let next_from_origin = origin + self.next;
+        next_from_origin - base_from_origin
     }
 
+    /// Lerp from the old sway target (base) to the new sway target (next)
     fn lerp_from(&self, origin: Vec3, alpha: f32) -> Vec3 {
         self.base + self.diff_from(origin) * alpha
     }
