@@ -40,7 +40,7 @@ fn main() {
         )
         .add_systems(
             FixedUpdate,
-            ((aim, breathing, weapon_sway, set_weapon_transform).chain(),),
+            ((aim, player_breath, weapon_sway, set_weapon_transform).chain(),),
         )
         .run();
 }
@@ -55,9 +55,32 @@ enum BreathDirection {
 }
 
 #[derive(Component)]
-struct BreathIntake {
+struct Breath {
+    speed: f32,
     alpha: f32,
+    amount: f32,
     direction: BreathDirection,
+}
+
+impl Breath {
+    fn breath(&mut self, delta: f32) {
+        self.alpha += self.speed * delta;
+
+        let change_breath = self.alpha >= 1.0 || self.alpha <= 0.0;
+
+        if change_breath {
+            self.alpha = 0.0;
+            self.direction = if self.direction == BreathDirection::In {
+                BreathDirection::Out
+            } else {
+                BreathDirection::In
+            };
+        }
+
+        self.amount = EasingCurve::new(0.0, 1.0, EaseFunction::SmoothStep)
+            .sample(self.alpha)
+            .expect("breath alpha not between 0 + 1");
+    }
 }
 
 #[derive(Component)]
@@ -66,20 +89,9 @@ struct PlayerCamera;
 #[derive(Component)]
 struct PlayerWeapon;
 
-fn breathing(time: Res<Time>, players_q: Query<&mut BreathIntake, With<Player>>) {
-    let speed = 0.75 * time.delta_secs(); // easy thing to modify based on player state
-
+fn player_breath(time: Res<Time>, players_q: Query<&mut Breath, With<Player>>) {
     for mut breath in players_q {
-        breath.alpha += speed;
-
-        if breath.alpha >= 1.0 {
-            breath.alpha = 0.0;
-            breath.direction = if breath.direction == BreathDirection::In {
-                BreathDirection::Out
-            } else {
-                BreathDirection::In
-            };
-        }
+        breath.breath(time.delta_secs());
     }
 }
 
@@ -102,11 +114,24 @@ impl WeaponSway {
         self.base = self.next;
     }
 
-    fn change(&mut self) {
+    fn change(&mut self, breath_direction: &BreathDirection) {
         let mut rng = rand::rng();
+
+        let sway_in = if *breath_direction == BreathDirection::In {
+            self.max_sway
+        } else {
+            0.0
+        };
+
+        let sway_out = if *breath_direction == BreathDirection::Out {
+            self.max_sway
+        } else {
+            0.0
+        };
+
         self.next = Vec3::new(
-            rng.random_range(-self.max_sway..=self.max_sway),
-            rng.random_range(-self.max_sway..=self.max_sway),
+            rng.random_range(-sway_in..=sway_out),
+            rng.random_range(-sway_in..=sway_out),
             rng.random_range(-self.max_sway..=self.max_sway),
         );
     }
@@ -132,7 +157,7 @@ impl WeaponSway {
 }
 
 fn weapon_sway(
-    players_q: Query<(&BreathIntake, &mut WeaponSway, &Children), With<Player>>,
+    players_q: Query<(&Breath, &mut WeaponSway, &Children), With<Player>>,
     camera_q: Query<(&PlayerCamera, &Children)>,
     mut weapon_query: Query<&mut TranslationPipeline, (With<PlayerWeapon>, With<WeaponActive>)>,
 ) {
@@ -146,12 +171,12 @@ fn weapon_sway(
         let change_sway = weapon_sway.is_complete();
 
         if change_sway {
-            weapon_sway.change();
+            weapon_sway.change(&breath.direction);
         }
 
-        let curve = EaseFunction::SmoothStep;
+        let curve = EaseFunction::Linear;
         let curve_alpha = EasingCurve::new(0.0, 1.0, curve)
-            .sample(breath.alpha)
+            .sample(breath.amount)
             .unwrap();
 
         // query the children -> player (here) -> camera -> weapon
@@ -361,7 +386,9 @@ fn setup_player(
             Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
             Restitution::ZERO.with_combine_rule(CoefficientCombine::Min),
             GravityScale(2.0),
-            BreathIntake {
+            Breath {
+                amount: 0.0,
+                speed: 0.75,
                 alpha: 0.0,
                 direction: BreathDirection::Out,
             },
