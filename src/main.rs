@@ -36,7 +36,11 @@ fn main() {
         .add_systems(Startup, setup_player)
         .add_systems(
             Update,
-            ((rotate_horizontal, look_vertical).chain(), player_shoot),
+            (
+                (rotate_horizontal, look_vertical).chain(),
+                player_shoot,
+                player_breath_alter,
+            ),
         )
         .add_systems(
             FixedUpdate,
@@ -54,17 +58,29 @@ enum BreathDirection {
     Out = 1,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 struct Breath {
     speed: f32,
     alpha: f32,
     amount: f32,
+    depth: f32,
     direction: BreathDirection,
 }
 
 impl Breath {
+    const MAX_SPEED: f32 = 10.0;
+    const MAX_DEPTH: f32 = 5.0;
+
     fn breath(&mut self, delta: f32) {
-        self.alpha += self.speed * delta;
+        self.speed = self.speed.clamp(0.0, Self::MAX_SPEED);
+        self.depth = self.depth.clamp(0.0, Self::MAX_DEPTH);
+
+        // clamp to max breathing speed to ensure shallow breaths (<1.0) at max breath effort doesnt
+        // create insane breathing rates
+        let breathing_rate = (self.speed / self.depth).clamp(0.0, Self::MAX_SPEED);
+
+        // increase alpha slower for deeper breaths
+        self.alpha += breathing_rate * delta;
 
         let change_breath = self.alpha >= 1.0 || self.alpha <= 0.0;
 
@@ -77,9 +93,9 @@ impl Breath {
             };
         }
 
-        self.amount = EasingCurve::new(0.0, 1.0, EaseFunction::SmoothStep)
+        self.amount = EasingCurve::new(0.0, self.depth, EaseFunction::SmoothStep)
             .sample(self.alpha)
-            .expect("breath alpha not between 0 + 1");
+            .unwrap_or_else(|| panic!("breath alpha not between 0 + {}", self.depth));
     }
 }
 
@@ -92,6 +108,29 @@ struct PlayerWeapon;
 fn player_breath(time: Res<Time>, players_q: Query<&mut Breath, With<Player>>) {
     for mut breath in players_q {
         breath.breath(time.delta_secs());
+    }
+}
+
+fn player_breath_alter(
+    players_q: Query<&mut Breath, With<Player>>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    for mut breath in players_q {
+        if keys.pressed(KeyCode::BracketRight) {
+            breath.depth += 0.1;
+        }
+
+        if keys.pressed(KeyCode::BracketLeft) {
+            breath.depth -= 0.1;
+        }
+
+        if keys.pressed(KeyCode::PageUp) {
+            breath.speed += 0.1;
+        }
+
+        if keys.pressed(KeyCode::PageDown) {
+            breath.speed -= 0.1;
+        }
     }
 }
 
@@ -114,25 +153,39 @@ impl WeaponSway {
         self.base = self.next;
     }
 
-    fn change(&mut self, breath_direction: &BreathDirection) {
+    fn change(&mut self, breath: &Breath) {
         let mut rng = rand::rng();
 
-        let sway_in = if *breath_direction == BreathDirection::In {
-            self.max_sway
+        let effective_sway = self.max_sway * breath.depth;
+        let half_sway = effective_sway / 2.0;
+
+        let sway_in = if breath.direction == BreathDirection::In {
+            effective_sway
         } else {
             0.0
         };
 
-        let sway_out = if *breath_direction == BreathDirection::Out {
-            self.max_sway
+        let sway_out = if breath.direction == BreathDirection::Out {
+            effective_sway
         } else {
             0.0
         };
+
+        let x_range = -half_sway..=half_sway;
+        let y_range = -sway_in..=sway_out;
+        let z_range = -effective_sway..=effective_sway;
+
+        if x_range.is_empty() || y_range.is_empty() || z_range.is_empty() {
+            return;
+        }
 
         self.next = Vec3::new(
+            // smaller half-sway in the X
+            rng.random_range(-half_sway..=half_sway),
+            // flip-flop up and down full sway for Y
             rng.random_range(-sway_in..=sway_out),
-            rng.random_range(-sway_in..=sway_out),
-            rng.random_range(-self.max_sway..=self.max_sway),
+            // full sway range in the Z
+            rng.random_range(-effective_sway..=effective_sway),
         );
     }
 
@@ -171,12 +224,13 @@ fn weapon_sway(
         let change_sway = weapon_sway.is_complete();
 
         if change_sway {
-            weapon_sway.change(&breath.direction);
+            weapon_sway.change(breath);
         }
 
-        let curve = EaseFunction::Linear;
+        let curve = EaseFunction::SmoothStep;
+
         let curve_alpha = EasingCurve::new(0.0, 1.0, curve)
-            .sample(breath.amount)
+            .sample(breath.alpha)
             .unwrap();
 
         // query the children -> player (here) -> camera -> weapon
@@ -389,6 +443,7 @@ fn setup_player(
             Breath {
                 amount: 0.0,
                 speed: 0.75,
+                depth: 1.0,
                 alpha: 0.0,
                 direction: BreathDirection::Out,
             },
