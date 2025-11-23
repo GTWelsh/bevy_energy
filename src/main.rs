@@ -6,9 +6,10 @@ mod scene;
 use avian3d::PhysicsPlugins;
 use avian3d::math::Scalar;
 use avian3d::prelude::{
-    CoefficientCombine, Collider, Friction, GravityScale, Restitution, RigidBody,
+    CoefficientCombine, Collider, Friction, GravityScale, LinearVelocity, Restitution, RigidBody,
 };
 use bevy::camera::Exposure;
+use bevy::ecs::relationship::Relationship;
 use bevy::pbr::Atmosphere;
 use bevy::post_process::bloom::Bloom;
 use bevy::{
@@ -20,7 +21,6 @@ use rand::Rng;
 /*
  * IDEAS
  * - Walking alpha
- * - Breathing alpha
  *
  * */
 
@@ -44,13 +44,78 @@ fn main() {
         )
         .add_systems(
             FixedUpdate,
-            ((aim, player_breath, weapon_sway, set_weapon_transform).chain(),),
+            (
+                (
+                    player_camera_sway,
+                    player_walk_init,
+                    player_walk_bob,
+                    apply_player_camera_sway,
+                )
+                    .chain(),
+                (
+                    aim,
+                    player_breath,
+                    weapon_sway,
+                    weapon_walk_bob,
+                    set_weapon_transform,
+                )
+                    .chain(),
+            ),
         )
         .run();
 }
 
 #[derive(Component)]
 struct Player;
+
+#[derive(Component)]
+struct Walk {
+    speed: f32,
+    alpha: f32,
+    amount: f32,
+    depth: f32,
+    side: WalkSide,
+}
+
+impl Walk {
+    const MAX_SPEED: f32 = 10.0;
+    const MAX_DEPTH: f32 = 5.0;
+
+    fn walk(&mut self, delta: f32) {
+        self.speed = self.speed.clamp(0.0, Self::MAX_SPEED);
+        self.depth = self.depth.clamp(0.0, Self::MAX_DEPTH);
+
+        let rate = (self.speed / self.depth).clamp(0.0, Self::MAX_SPEED);
+
+        // increase alpha slower for deeper breaths
+        let change = rate * delta;
+
+        self.alpha += change;
+
+        self.alpha = self.alpha.clamp(0.0, 1.0);
+
+        let change_stride = self.alpha >= 1.0 || self.alpha <= 0.0;
+
+        if change_stride {
+            self.alpha = 0.0;
+            self.side = if self.side == WalkSide::Left {
+                WalkSide::Right
+            } else {
+                WalkSide::Left
+            };
+        }
+
+        self.amount = EasingCurve::new(0.0, self.depth, EaseFunction::SmoothStep)
+            .sample(self.alpha)
+            .unwrap_or_else(|| panic!("walk alpha not between 0 + {}", self.depth));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum WalkSide {
+    Left = 0,
+    Right = 1,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum BreathDirection {
@@ -104,6 +169,13 @@ struct PlayerCamera;
 
 #[derive(Component)]
 struct PlayerWeapon;
+
+fn player_walk_init(time: Res<Time>, players_q: Query<(&mut Walk, &LinearVelocity), With<Player>>) {
+    for (mut walk, speed) in players_q {
+        walk.speed = speed.length() * 2.;
+        walk.walk(time.delta_secs());
+    }
+}
 
 fn player_breath(time: Res<Time>, players_q: Query<&mut Breath, With<Player>>) {
     for mut breath in players_q {
@@ -206,6 +278,52 @@ impl WeaponSway {
     /// Lerp from the old sway target (base) to the new sway target (next)
     fn lerp_from(&self, origin: Vec3, alpha: f32) -> Vec3 {
         self.base + self.diff_from(origin) * alpha
+    }
+}
+
+fn weapon_walk_bob(
+    players_q: Query<(&Walk, &Children), With<Player>>,
+    camera_q: Query<(&PlayerCamera, &Children)>,
+    mut weapon_query: Query<&mut TranslationPipeline, (With<PlayerWeapon>, With<WeaponActive>)>,
+) {
+    for (walk, children) in players_q {
+        let curve = EaseFunction::SmoothStep;
+
+        let mut curve_alpha = EasingCurve::new(0.0, 1.0, curve)
+            .sample(walk.alpha)
+            .unwrap();
+
+        // query the children -> player (here) -> camera -> weapon
+        for &camera_entity in children {
+            let camera = camera_q.get(camera_entity);
+
+            if camera.is_err() {
+                continue;
+            }
+
+            if walk.side == WalkSide::Right {
+                curve_alpha = 1.0 - curve_alpha;
+            }
+
+            let recenter_threshold = 2.0;
+            if walk.speed < recenter_threshold {
+                let recenter = -curve_alpha * (1.0 - (walk.speed / recenter_threshold));
+                curve_alpha += recenter;
+            }
+
+            for &child in camera.unwrap().1 {
+                if let Ok(mut position_pipe) = weapon_query.get_mut(child) {
+                    let effectiveness = (walk.speed / recenter_threshold).clamp(0.0, 1.0);
+                    position_pipe
+                        .queue((vec3(-0.003, -0.0015, 0.0015) * curve_alpha) * effectiveness);
+                    position_pipe.queue(
+                        (vec3(0.0, 0.003, 0.0) * (1.0 - (curve_alpha + 0.5)).abs()) * effectiveness,
+                    );
+                    position_pipe
+                        .queue((vec3(0.003, -0.0015, 0.0) * (1.0 - curve_alpha)) * effectiveness);
+                }
+            }
+        }
     }
 }
 
@@ -419,6 +537,95 @@ impl TranslationPipeline {
 #[derive(Component)]
 struct WeaponActive;
 
+fn apply_player_camera_sway(
+    mut q_camera: Query<(&mut TranslationPipeline, &mut Transform), With<PlayerCamera>>,
+) {
+    for (mut translation_pipe, mut transform) in &mut q_camera {
+        transform.translation = translation_pipe.apply();
+    }
+}
+
+fn player_walk_bob(
+    players_q: Query<&Walk, With<Player>>,
+    q_camera: Query<(&ChildOf, &mut TranslationPipeline), With<PlayerCamera>>,
+) {
+    for (child_of, mut translation_pipe) in q_camera {
+        let walk = players_q.get(child_of.get()).unwrap();
+
+        //TODO: WIP
+        let walk_transform = Vec3::new(0.05, -0.01, 0.0);
+        let walk_transform_alt = Vec3::new(0.0, 0.01, 0.0);
+        let walk_transform_alt_again = Vec3::new(-0.05, -0.01, 0.0);
+
+        let curve = EaseFunction::SmootherStep;
+
+        let start = if walk.side == WalkSide::Left {
+            0.0
+        } else {
+            1.0
+        };
+
+        let end = if walk.side == WalkSide::Left {
+            1.0
+        } else {
+            0.0
+        };
+
+        let curve_alpha = EasingCurve::new(start, end, curve)
+            .sample(walk.alpha)
+            .unwrap();
+
+        translation_pipe.additive_translations.clear();
+
+        translation_pipe
+            .additive_translations
+            .push(walk_transform * curve_alpha);
+
+        translation_pipe
+            .additive_translations
+            .push(walk_transform_alt * (1.0 - curve_alpha));
+
+        translation_pipe
+            .additive_translations
+            .push(walk_transform_alt_again * (1.0 - (curve_alpha + 0.5)).abs());
+    }
+}
+
+fn player_camera_sway(
+    players_q: Query<&Breath, With<Player>>,
+    q_camera: Query<(&ChildOf, &mut TranslationPipeline), With<PlayerCamera>>,
+) {
+    for (child_of, mut translation_pipe) in q_camera {
+        let breath = players_q.get(child_of.get()).unwrap();
+
+        let breath_transform = Vec3::new(0.01, 0.03, 0.02);
+
+        let curve = EaseFunction::SmootherStep;
+
+        let start = if breath.direction == BreathDirection::In {
+            0.0
+        } else {
+            1.0
+        };
+
+        let end = if breath.direction == BreathDirection::In {
+            1.0
+        } else {
+            0.0
+        };
+
+        let curve_alpha = EasingCurve::new(start, end, curve)
+            .sample(breath.alpha)
+            .unwrap();
+
+        translation_pipe.additive_translations.clear();
+
+        translation_pipe
+            .additive_translations
+            .push(breath_transform * curve_alpha);
+    }
+}
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -447,9 +654,18 @@ fn setup_player(
                 alpha: 0.0,
                 direction: BreathDirection::Out,
             },
+            Walk {
+                amount: 0.0,
+                speed: 1.5,
+                depth: 1.0,
+                alpha: 0.0,
+                side: WalkSide::Left,
+            },
             WeaponSway::new(0.0005),
         ))
         .with_children(|parent| {
+            let cam_transform =
+                Transform::from_xyz(0.0, 0.85, -0.51).looking_to(Vec3::NEG_Z, Vec3::Y);
             parent
                 .spawn((
                     Camera3d::default(),
@@ -463,7 +679,8 @@ fn setup_player(
                     Atmosphere::EARTH,
                     Exposure::SUNLIGHT,
                     Tonemapping::AcesFitted,
-                    Transform::from_xyz(0.0, 0.85, -0.51).looking_to(Vec3::NEG_Z, Vec3::Y),
+                    cam_transform,
+                    TranslationPipeline::new(cam_transform.translation),
                     Bloom::NATURAL,
                     PlayerCamera,
                 ))
