@@ -172,7 +172,7 @@ struct PlayerWeapon;
 
 fn player_walk_init(time: Res<Time>, players_q: Query<(&mut Walk, &LinearVelocity), With<Player>>) {
     for (mut walk, speed) in players_q {
-        walk.speed = speed.length() * 2.;
+        walk.speed = speed.length();
         walk.walk(time.delta_secs());
     }
 }
@@ -314,13 +314,11 @@ fn weapon_walk_bob(
             for &child in camera.unwrap().1 {
                 if let Ok(mut position_pipe) = weapon_query.get_mut(child) {
                     let effectiveness = (walk.speed / recenter_threshold).clamp(0.0, 1.0);
-                    position_pipe
-                        .queue((vec3(-0.003, -0.0015, 0.0015) * curve_alpha) * effectiveness);
-                    position_pipe.queue(
-                        (vec3(0.0, 0.003, 0.0) * (1.0 - (curve_alpha + 0.5)).abs()) * effectiveness,
-                    );
-                    position_pipe
-                        .queue((vec3(0.003, -0.0015, 0.0) * (1.0 - curve_alpha)) * effectiveness);
+                    let scale = 0.1 * effectiveness;
+
+                    for t in lerp_step_sequence(curve_alpha, Some(scale)) {
+                        position_pipe.additive_translations.push(t);
+                    }
                 }
             }
         }
@@ -545,19 +543,26 @@ fn apply_player_camera_sway(
     }
 }
 
+fn lerp_step_sequence(alpha: f32, scale: Option<f32>) -> Vec<Vec3> {
+    let scale_value = scale.unwrap_or(1.0);
+
+    let walk_transform = vec3(-0.03, -0.015, 0.0) * scale_value;
+    let walk_transform_alt = vec3(0.0, 0.03, 0.0) * scale_value;
+    let walk_transform_alt_again = vec3(0.03, -0.015, 0.0) * scale_value;
+
+    vec![
+        walk_transform * alpha,
+        walk_transform_alt * (1.0 - (alpha + 0.5)).abs(),
+        walk_transform_alt_again * (1.0 - alpha),
+    ]
+}
+
 fn player_walk_bob(
     players_q: Query<&Walk, With<Player>>,
     q_camera: Query<(&ChildOf, &mut TranslationPipeline), With<PlayerCamera>>,
 ) {
     for (child_of, mut translation_pipe) in q_camera {
         let walk = players_q.get(child_of.get()).unwrap();
-
-        //TODO: WIP
-        let walk_transform = Vec3::new(0.05, -0.01, 0.0);
-        let walk_transform_alt = Vec3::new(0.0, 0.01, 0.0);
-        let walk_transform_alt_again = Vec3::new(-0.05, -0.01, 0.0);
-
-        let curve = EaseFunction::SmootherStep;
 
         let start = if walk.side == WalkSide::Left {
             0.0
@@ -571,23 +576,17 @@ fn player_walk_bob(
             0.0
         };
 
+        let curve = EaseFunction::SmootherStep;
+
         let curve_alpha = EasingCurve::new(start, end, curve)
             .sample(walk.alpha)
             .unwrap();
 
         translation_pipe.additive_translations.clear();
 
-        translation_pipe
-            .additive_translations
-            .push(walk_transform * curve_alpha);
-
-        translation_pipe
-            .additive_translations
-            .push(walk_transform_alt * (1.0 - curve_alpha));
-
-        translation_pipe
-            .additive_translations
-            .push(walk_transform_alt_again * (1.0 - (curve_alpha + 0.5)).abs());
+        for t in lerp_step_sequence(curve_alpha, None) {
+            translation_pipe.additive_translations.push(t);
+        }
     }
 }
 
