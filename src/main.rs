@@ -18,12 +18,6 @@ use bevy::{
 use bevy_dev_tools::fps_overlay::FpsOverlayPlugin;
 use rand::Rng;
 
-/*
- * IDEAS
- * - Walking alpha
- *
- * */
-
 fn main() {
     App::new()
         .add_plugins((
@@ -37,7 +31,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                (rotate_horizontal, look_vertical).chain(),
+                (rotate_horizontal, look_vertical, damp_weapon_look).chain(),
                 player_shoot,
                 player_breath_alter,
             ),
@@ -467,38 +461,99 @@ fn aim(
     }
 }
 
+fn damp_weapon_look(
+    time: Res<Time>,
+    mut q_look_amount: Query<(&mut PlayerLookRotation, &Children), With<Player>>,
+    q_camera: Query<&Children, With<PlayerCamera>>,
+    mut q_weapon: Query<&mut Transform, With<PlayerWeapon>>,
+) {
+    let delta = time.delta_secs();
+    for (look_amount, children) in q_look_amount.iter_mut() {
+        children
+            .iter()
+            .filter_map(|x| q_camera.get(x).ok())
+            .flat_map(|x| x.iter())
+            .for_each(|x| {
+                let r_weapon = q_weapon.get_mut(x);
+                if r_weapon.is_err() {
+                    return;
+                }
+                let mut weapon = r_weapon.unwrap();
+
+                let smooth_reduce = |rot: f32, mut amount: f32| {
+                    if rot != 0.0 {
+                        amount -= (rot * 30.0) * delta;
+                    }
+                    amount
+                };
+
+                let weapon_look_sens_x = 0.3;
+                let weapon_look_sens_y = 0.15;
+
+                let mut amount = look_amount.0;
+
+                amount.x *= weapon_look_sens_x;
+                amount.y *= weapon_look_sens_y;
+
+                amount.x = smooth_reduce(weapon.rotation.x, amount.x);
+                amount.y = smooth_reduce(weapon.rotation.y, amount.y);
+
+                weapon.rotate_x(amount.x);
+                weapon.rotate_y(amount.y);
+            });
+    }
+}
+
 fn look_vertical(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
-    mut transform: Single<&mut Transform, With<PlayerCamera>>,
+    mut q_look_amount: Query<&mut PlayerLookRotation, With<Player>>,
+    mut q_transform: Query<(&ChildOf, &mut Transform), With<PlayerCamera>>,
 ) {
     const LIMIT: f32 = 45_f32;
     const ZERO: f32 = 0_f32;
 
-    let rotation_speed: f32 = 6_f32;
+    let rotation_speed: f32 = 4.0;
     let rotation_amount_x = (-mouse_motion.delta.y * rotation_speed) * time.delta_secs();
     let positive_rot = rotation_amount_x > ZERO;
     let negative_rot = rotation_amount_x < ZERO;
-    let current_rot = transform.rotation.to_euler(EulerRot::XYZ).0.to_degrees();
-    let high = current_rot > LIMIT && positive_rot;
-    let low = current_rot < -LIMIT && negative_rot;
 
-    if high || low {
-        return;
+    for (is_child, mut transform) in q_transform.iter_mut() {
+        let current_rot = transform.rotation.to_euler(EulerRot::XYZ).0.to_degrees();
+        let high = current_rot > LIMIT && positive_rot;
+        let low = current_rot < -LIMIT && negative_rot;
+
+        if high || low {
+            return;
+        }
+
+        let amount = rotation_amount_x.to_radians();
+
+        transform.rotate_x(amount);
+
+        let q_parent = q_look_amount.get_mut(is_child.get());
+
+        if q_parent.is_err() {
+            continue;
+        }
+
+        q_parent.unwrap().0.x = amount;
     }
-
-    transform.rotate_x(rotation_amount_x.to_radians());
 }
 
 fn rotate_horizontal(
     mouse_motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
-    mut transform: Single<&mut Transform, With<Player>>,
+    mut q_transform: Query<(&mut Transform, &mut PlayerLookRotation), With<Player>>,
 ) {
-    let rotation_speed: f32 = 0.2;
+    let rotation_speed: f32 = 0.1;
     let rotation_amount_y = -mouse_motion.delta.x * rotation_speed;
+    let amount = rotation_amount_y * time.delta_secs();
 
-    transform.rotate_y(rotation_amount_y * time.delta_secs());
+    for (mut transform, mut look_rot) in q_transform.iter_mut() {
+        transform.rotate_y(amount);
+        look_rot.0.y = amount;
+    }
 }
 
 #[derive(Component)]
@@ -589,7 +644,7 @@ fn player_walk_bob(
         translation_pipe.additive_translations.clear();
         translation_pipe
             .additive_translations
-            .push(walk_curve.sample_clamped(curve_alpha) * 1.2);
+            .push(walk_curve.sample_clamped(curve_alpha) * 1.0);
     }
 }
 
@@ -628,6 +683,9 @@ fn player_camera_sway(
     }
 }
 
+#[derive(Component)]
+struct PlayerLookRotation(Vec2);
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -664,6 +722,7 @@ fn setup_player(
                 side: WalkSide::Left,
             },
             WeaponSway::new(0.0005),
+            PlayerLookRotation(Vec2::default()),
         ))
         .with_children(|parent| {
             let cam_transform =
